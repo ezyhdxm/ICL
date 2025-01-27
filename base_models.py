@@ -1,9 +1,10 @@
-from dataclass import dataclass
+from dataclasses import dataclass
 import itertools
 import logging
 import random
 import math
 import numpy as np
+from collections import namedtuple
 import pickle
 import time
 import torch
@@ -12,17 +13,8 @@ import sys
 from torch import nn, Tensor
 from torch.nn import functional as F
 from typing import List, Optional, Tuple
-
-
-class RelativePositionalEncoding(nn.Module):
-    def __init__(self, head_dim, max_length):
-        super().__init__()
-        self.head_dim = head_dim
-        self.max_length = max_length
-        self.pe = nn.Parameter(torch.randn(2 * self.max_length - 1, head_dim) / head_dim ** 0.5)
-        
-    def forward(self, seq_len):
-        distances = torch.arange(-seq_len+1, seq_len)
+from pos_encoder import *
+from attention import *
 
 
 class MultiHeadAttention(nn.Module):
@@ -39,19 +31,52 @@ class MultiHeadAttention(nn.Module):
         self.mask = torch.tril(torch.ones(config.seq_len, config.seq_len)).unsqueeze(0).unsqueeze(1)
         self.mask = self.mask.to(config.device)
         self.get_attn = config.get_attn
+        self.pos_enc = config.pos_enc
+        self.seq_len = config.seq_len
+        self.scale = self.head_dim ** 0.5
+        self.flash = config.flash
+        assert not (self.flash and self.pos_enc == "rpe"), "Flash Attention does not support RPE currently."  
+        if self.flash:
+            self.flashAttend = FlashAttend(config)
+        if self.pos_enc == "rpe":
+            self.PEK = RelativePositionalEncoding(self.head_dim, self.pos_max_len) # (T,T,D)
+            self.PEV = RelativePositionalEncoding(self.head_dim, self.pos_max_len) # (T,T,D)
+        elif self.pos_enc == "rotary":
+            self.rotary_emb = RotaryPositionalEmbeddings(self.head_dim, self.pos_max_len)
+        
 
-    def forward(self, x): # (B,T,C)
-        batch_size, seq_len, embed_dim = x.size()
+    def forward(self, x): # x: (B,T,C)
+        batch_size, seq_len, _ = x.size()
         Q = self.query(x).view(batch_size, seq_len, self.n_head, self.head_dim).transpose(1,2) # (B,H,T,D)
-        K = self.key(x).view(batch_size, seq_len, self.n_head, self.head_dim).transpose(1,2)
-        V = self.value(x).view(batch_size, seq_len, self.n_head, self.head_dim).transpose(1,2)
-        attn_score = Q @ K.transpose(-1,-2) / (self.head_dim ** 0.5)
+        K = self.key(x).view(batch_size, seq_len, self.n_head, self.head_dim).transpose(1,2) # (B,H,T,D)
+        V = self.value(x).view(batch_size, seq_len, self.n_head, self.head_dim).transpose(1,2) # (B,H,T,D)
+        if self.pos_enc == "rotary":
+            Q = self.rotary_emb(Q)
+            K = self.rotary_emb(K)
+        if self.flash:
+            assert self.get_attn == 0, "Flash Attention does not output attentions."
+            return self.flashAttend(Q, K, V)
+        
+        attn_score = Q @ K.transpose(-1,-2) / self.scale # (B,H,T,T)
+        if self.pos_enc == "rpe":
+            Q2 = self.query(x).view(batch_size, seq_len, self.n_head, self.head_dim).transpose(0,1) # (T,B,H,D)
+            Q2 = Q2.contiguous().view(seq_len, batch_size*self.n_head, self.head_dim) # (T,BH,D)
+            attn_score2 = torch.matmul(Q2, self.PEK(seq_len).transpose(1,2)) # (T,BH,D) @ (T,D,T) -> (T,BH,T)
+            attn_score2 = attn_score2.view(seq_len, batch_size, self.n_head, seq_len).transpose(0,1).contiguous() # (B,H,T,T)
+            attn_score += attn_score2 / self.scale
         attn_score = attn_score.masked_fill(self.mask==0, -float("inf"))
         attn = F.softmax(attn_score, dim=-1) # (B,H,T,T)
-        out = attn @ V # (B, H, T, D)
-        out = out.transpose(1,2).contiguous().view(batch_size,seq_len,-1) # (B, T, C)
+        out = attn @ V # (B,H,T,D)
+        if self.pos_enc == "rpe":
+            attn2 = attn.transpose(0,2).contiguous().view(seq_len, -1, seq_len) # (T,BH,T)
+            out2 = torch.matmul(attn2, self.PEV(seq_len)) # (T,BH,T) @ (T,T,D) -> (T,BH,D)
+            out2 = out2.view(seq_len, batch_size, -1, self.head_dim).transpose(0,2) # (B,H,T,D)
+            out += out2
+        out = out.transpose(1,2).contiguous().view(batch_size,seq_len,-1) # (B,T,C)
         out = self.out(out)
-        return out, attn.detach().cpu() if self.get_attn else out
+        if self.get_attn > 0:
+            return out, attn.detach().cpu() 
+        return out
         
         
 
@@ -65,6 +90,7 @@ class TFBlock(nn.Module):
         self.get_attn = config.get_attn
 
         if config.mlp:
+            assert config.ff_dim is not None, "FeedForward dimension cannot be empty."
             self.mlp = nn.Sequential(
                 nn.Linear(config.emb_dim, config.ff_dim),
                 nn.ReLU(),
@@ -86,8 +112,13 @@ class TFBlock(nn.Module):
             x = self.ln1(x)
         if self.mlp is not None:
             mlp_out = self.mlp(x)
-            x = self.ln2(x + self.dropout(mlp_out))
-        return x, attn_map
+            if self.dropout is not None:
+                x = self.ln2(x + self.dropout(mlp_out))
+            else:
+                x = self.ln2(x + mlp_out)
+        if self.get_attn > 0:
+            return x, attn_map 
+        return x
         
 class Transformer(nn.Module):
     def __init__(self, config):
@@ -96,15 +127,20 @@ class Transformer(nn.Module):
         self.positional_encoding = nn.Parameter(torch.zeros(1, config.seq_len, config.emb_dim)).to(config.device)
         self.layers = nn.ModuleList([TFBlock(config) for _ in range(config.num_layers)])
         self.output_layer = nn.Linear(config.emb_dim, config.vocab_size)
-        if config.get_attn:
+        self.get_attn = config.get_attn
+        if config.get_attn > 0:
             self.atten_maps = torch.zeros((config.num_layers, config.num_heads, config.seq_len, config.seq_len))
 
     def forward(self, x):
         x = self.embed(x) + self.positional_encoding[:, :x.size(1), :]
         for i, layer in enumerate(self.layers):
-            x, attn_map = layer(x)
-            if config.get_attn:
+            if self.get_attn > 0:
+                x, attn_map = layer(x)
                 self.atten_maps[i] = attn_map.mean(dim=0)
+            else:
+                x = layer(x)
             
         logits = self.output_layer(x)
-        return logits, self.atten_maps if config.get_attn else logits
+        if self.get_attn > 0: 
+            return logits, self.atten_maps 
+        return logits
