@@ -50,3 +50,20 @@ class RotaryPositionalEmbeddings(nn.Module):
         x_out = torch.stack([x1*cosin - x2*sine, x2*cosin + x1*sine], -1) # (B,T,H,D/2,2)
         x_out = x_out.flatten(3) # (B,T,H,D)
         return x_out.type_as(x)
+
+# https://arxiv.org/pdf/2108.12409
+# See https://github.com/jaketae/alibi/blob/main/alibi/attention.py
+class AliBiPositionalEncoding(nn.Module):
+    def __init__(self, num_heads):
+        super().__init__()
+        base = (2**8) ** (1 / num_heads)
+        slopes = 1. / base ** torch.arange(1,num_heads+1)
+        slopes = slopes.unsqueeze(-1).unsqueeze(-1)
+        self.register_buffer("slopes", slopes, persistent=False)
+        
+    def forward(self, seq_len):
+        device = self.slopes.device
+        range_vec = torch.arange(seq_len).to(device)
+        distances = range_vec.unsqueeze(0) - range_vec.unsqueeze(1)
+        alibi_emb = self.slopes * distances.unsqueeze(0)
+        return alibi_emb.unsqueeze(0)

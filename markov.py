@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 
+# Simple Markov chain sampler
 class MarkovSampler:
     def __init__(self, config):
         self.seq_len = config.seq_len
@@ -40,6 +41,79 @@ class MarkovSampler:
         
         return samples
 
+
+# Bigram data task: https://arxiv.org/pdf/2306.00802
+class BiettiTask:
+    def __init__(self, config):
+        self.seq_len = config.seq_len
+        self.num_states = config.vocab_size
+        self.marginal = config.marginal
+        self.trans_mat = config.trans_mat
+        self.batch_size = config.batch_size
+        self.test_size = config.test_size
+        self.k = config.k
+    
+    def generate(self, mode="train"):
+        num_samples = self.batch_size if mode == "train" else self.test_size
+        prob_matrix = self.marginal.unsqueeze(0).repeat(num_samples, 1)
+        # Sample without replacement
+        q_toks = torch.multinomial(prob_matrix, self.k, replacement=False)  # Shape: (num_samples, k)
+        trans_probs = self.trans_mat[q_toks.reshape(-1)]  # Shape: (num_samples * k, num_states)
+        o_toks = torch.multinomial(trans_probs, num_samples=1).reshape(num_samples, self.k)
+        
+        # Initialize the samples tensor
+        samples = torch.zeros((num_samples, self.seq_len), dtype=torch.long)
+
+         # Initialize the state (randomly choose starting states for each sequence)
+        current_tokens = torch.multinomial(prob_matrix, num_samples=1).squeeze(1)
+        samples[:, 0] = current_tokens
+        
+        for t in range(1, self.seq_len):
+            # Check if current_tokens are in q_toks
+            matches = (q_toks == current_tokens.unsqueeze(1))  # Shape: (num_samples, k)
+            matched_indices = matches.nonzero(as_tuple=False)  # Indices where matches occur
+
+            # Prepare next tokens
+            nxt_tokens = torch.full((num_samples,), -1, dtype=torch.long)  # Placeholder for next tokens
+
+            # Case 1: Replace with o_toks when current_tokens match q_toks
+            if matched_indices.size(0) > 0:
+                rows, cols = matched_indices[:, 0], matched_indices[:, 1]  # Batch indices and column indices
+                nxt_tokens[rows] = o_toks[rows, cols]  # Assign corresponding o_toks
+
+            # Case 2: Sample from the transition matrix for unmatched tokens
+            unmatched_mask = nxt_tokens == -1  # Mask for tokens not matched in q_toks
+            unmatched_tokens = current_tokens[unmatched_mask]  # Unmatched tokens
+            if unmatched_tokens.size(0) > 0:
+                transition_probs = self.trans_mat[unmatched_tokens]  # Get transition probabilities
+                sampled_tokens = torch.multinomial(transition_probs, num_samples=1).squeeze(1)  # Sample next tokens
+                nxt_tokens[unmatched_mask] = sampled_tokens
+
+            # Update sequences and current tokens
+            samples[:, t] = nxt_tokens
+            current_tokens = nxt_tokens
+        
+        return samples
+
+
+       
+            
+        
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Empirical n-gram learner
 class ngramLearner:
     def __init__(self, vocab_size, order):
         self.order = order

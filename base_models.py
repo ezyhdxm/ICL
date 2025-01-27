@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-import itertools
 import logging
 import random
 import math
@@ -43,6 +42,8 @@ class MultiHeadAttention(nn.Module):
             self.PEV = RelativePositionalEncoding(self.head_dim, self.pos_max_len) # (T,T,D)
         elif self.pos_enc == "rotary":
             self.rotary_emb = RotaryPositionalEmbeddings(self.head_dim, self.pos_max_len)
+        elif self.pos_enc == "alibi":
+            self.alibi_emb = AliBiPositionalEncoding(self.n_head)
         
 
     def forward(self, x): # x: (B,T,C)
@@ -64,6 +65,9 @@ class MultiHeadAttention(nn.Module):
             attn_score2 = torch.matmul(Q2, self.PEK(seq_len).transpose(1,2)) # (T,BH,D) @ (T,D,T) -> (T,BH,T)
             attn_score2 = attn_score2.view(seq_len, batch_size, self.n_head, seq_len).transpose(0,1).contiguous() # (B,H,T,T)
             attn_score += attn_score2 / self.scale
+        elif self.pos_enc=="alibi":
+            attn_score += self.alibi_emb(self.seq_len)
+
         attn_score = attn_score.masked_fill(self.mask==0, -float("inf"))
         attn = F.softmax(attn_score, dim=-1) # (B,H,T,T)
         out = attn @ V # (B,H,T,D)

@@ -29,8 +29,15 @@ class Config:
     get_attn: int = 50
     device: str = "cuda"
     weight_decay: float = 1e-4
+
+    # Scheduler
+    T_max: int = 20
     
     # Data
     order: int = 2
     alpha: float = 1
     test_size: int = 2048
+    
+    # N-Gram
+    ngram: bool = True
+    max_gram: int = 4
