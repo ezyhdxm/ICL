@@ -23,12 +23,19 @@ class MultiHeadAttention(nn.Module):
         self.n_head = config.num_heads
         self.head_dim = self.emb_dim // self.n_head
         assert self.emb_dim % self.n_head == 0, "Embedding dimension must be divisible by the number of heads."
-        self.query = nn.Linear(self.emb_dim, self.emb_dim)
-        self.key = nn.Linear(self.emb_dim, self.emb_dim)
-        self.value = nn.Linear(self.emb_dim, self.emb_dim)
+        if config.identity_query:
+            self.query = nn.Identity()
+        else:
+            self.query = nn.Linear(self.emb_dim, self.emb_dim, bias=config.bias)
+        self.key = nn.Linear(self.emb_dim, self.emb_dim, bias=config.bias)
+        self.value = nn.Linear(self.emb_dim, self.emb_dim, bias=config.bias)
+        if config.freeze_value:
+            self.value.weight.requires_grad_(False)
         self.out = nn.Linear(self.emb_dim, self.emb_dim)
+        if config.freeze_out:
+            self.out.weight.requires_grad_(False)
         self.mask = torch.tril(torch.ones(config.seq_len, config.seq_len)).unsqueeze(0).unsqueeze(1)
-        self.mask = self.mask.to(config.device)
+        self.mask = self.mask.to(config.device) # TODO: make self.mask a register_buffer
         self.get_attn = config.get_attn
         self.pos_enc = config.pos_enc
         self.seq_len = config.seq_len
@@ -136,7 +143,10 @@ class Transformer(nn.Module):
             self.atten_maps = torch.zeros((config.num_layers, config.num_heads, config.seq_len, config.seq_len))
 
     def forward(self, x):
-        x = self.embed(x) + self.positional_encoding[:, :x.size(1), :]
+        if self.pos_enc == "abs":
+            x = self.embed(x) + self.positional_encoding(torch.arange(x.size(1), device=x.device).view(1, x.size(1)))
+        else:
+            x = self.embed(x)
         for i, layer in enumerate(self.layers):
             if self.get_attn > 0:
                 x, attn_map = layer(x)

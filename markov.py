@@ -43,6 +43,7 @@ class MarkovSampler:
 
 
 # Bigram data task: https://arxiv.org/pdf/2306.00802
+# By vectorization, our implemetation is much faster compared to the original implementation.
 class BiettiTask:
     def __init__(self, config):
         self.seq_len = config.seq_len
@@ -52,8 +53,13 @@ class BiettiTask:
         self.batch_size = config.batch_size
         self.test_size = config.test_size
         self.k = config.k
+        self.show_latents = config.show_latents
+        self.seed = config.seed
+        self.show_mask = config.show_mask
     
     def generate(self, mode="train"):
+        if self.seed is not None:
+            torch.manual_seed(self.seed)
         num_samples = self.batch_size if mode == "train" else self.test_size
         prob_matrix = self.marginal.unsqueeze(0).repeat(num_samples, 1)
         # Sample without replacement
@@ -62,11 +68,20 @@ class BiettiTask:
         o_toks = torch.multinomial(trans_probs, num_samples=1).reshape(num_samples, self.k)
         
         # Initialize the samples tensor
-        samples = torch.zeros((num_samples, self.seq_len), dtype=torch.long)
+        if self.show_latents:
+            samples = torch.zeros((num_samples, self.seq_len+self.k), dtype=torch.long)
+            samples[:, :self.k] = q_toks
+            output_mask = torch.zeros((num_samples, self.seq_len+self.k), dtype=torch.long)
+            output_mask[:, :self.k] = -1
+            off_set = self.k
+        else:
+            samples = torch.zeros((num_samples, self.seq_len), dtype=torch.long)
+            output_mask = torch.zeros((num_samples, self.seq_len), dtype=torch.long)
+            off_set = 0
 
          # Initialize the state (randomly choose starting states for each sequence)
         current_tokens = torch.multinomial(prob_matrix, num_samples=1).squeeze(1)
-        samples[:, 0] = current_tokens
+        samples[:, off_set] = current_tokens
         
         for t in range(1, self.seq_len):
             # Check if current_tokens are in q_toks
@@ -80,6 +95,7 @@ class BiettiTask:
             if matched_indices.size(0) > 0:
                 rows, cols = matched_indices[:, 0], matched_indices[:, 1]  # Batch indices and column indices
                 nxt_tokens[rows] = o_toks[rows, cols]  # Assign corresponding o_toks
+                output_mask[rows, off_set+t-1] = 1  # Update output mask
 
             # Case 2: Sample from the transition matrix for unmatched tokens
             unmatched_mask = nxt_tokens == -1  # Mask for tokens not matched in q_toks
@@ -90,26 +106,17 @@ class BiettiTask:
                 nxt_tokens[unmatched_mask] = sampled_tokens
 
             # Update sequences and current tokens
-            samples[:, t] = nxt_tokens
+            samples[:, off_set+t] = nxt_tokens
             current_tokens = nxt_tokens
+        
+        if self.show_mask:
+            return samples, output_mask
         
         return samples
 
 
        
             
-        
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -164,3 +171,5 @@ class ngramLearner:
         one_hot_labels = F.one_hot(batch, num_classes=self.vocab_size).float()
         loss = -torch.sum(one_hot_labels * torch.log(probs)) / batch.size(0) / (batch.size(1))
         return loss
+
+

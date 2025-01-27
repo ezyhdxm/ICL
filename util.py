@@ -1,20 +1,36 @@
-from collections import Counter, defaultdict
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from helper import print_once
 
-def get_unigrams(s):
-    return Counter(s)
+#################
+# Bietti Probes #
+#################
 
-def get_bigrams(s):
-    return Counter(zip(s, s[1:]))
+# See the construction on page 6 of the paper: https://arxiv.org/pdf/2306.00802
+# This probe is to measure to what extend linear weights serve as associate memories.
+def memory_recall_probe(num_tokens, model, to_probe, seq_len=None, device='cpu'):
+    range_toks = torch.arange(num_tokens).to(device)
+    if to_probe == "wk1": 
+        toks_key = model.embed(range_toks)
+        toks_key = model.layers[0].MHA.value(toks_key)
+        toks_key = model.layers[0].MHA.out(toks_key)
+        toks_key = model.layers[1].MHA.key(toks_key)
 
-def get_bigrams_cond(s):
-    bigrams = get_bigrams(s)
-    bigrams_cond = defaultdict(set)
-    for (x, y), c in bigrams.items():
-        bigrams_cond[x].add((y, c))
-    return bigrams_cond
-
-def get_itos(chars):
-    return {i: c for i, c in enumerate(chars)}
-
-def get_stoi(chars):
-    return {c: i for i, c in enumerate(chars)} 
+        toks_query = model.embed(range_toks)
+        toks_query = model.layers[1].MHA.query(toks_query)
+        return ((toks_query @ toks_key.t()).argmax(-1) == range_toks).float().mean().item()
+    
+    elif to_probe == "wo1":
+        toks = model.embed(range_toks)
+        toks = model.layers[1].MHA.value(toks) 
+        toks = model.layers[1].MHA.out(toks) # if associated memory, then toks is close to the unembedded matrix
+        toks = model.output_layer(toks)
+        return (toks.argmax(-1) == range_toks).float().mean().item()
+    
+    elif to_probe == "wk0":
+        range_pos_toks = torch.arange(seq_len).to(device)
+        pe = model.positional_encoding(range_pos_toks) # (T, D)
+        k = model.layers[0].MHA.key(pe[:-1,:]) # (T-1, D)
+        q = model.layers[0].MHA.query(pe[1:,:]) # (T-1, D)
+        return ((q@k.t()).argmax(-1)==range_pos_toks[:seq_len-1]).float().mean().item()
