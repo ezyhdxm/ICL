@@ -75,5 +75,22 @@ class BiettiSamplerConfig(BaseConfig):
             self.trans_mat /= self.trans_mat.sum(dim=1, keepdim=True)
         else:
             raise NotImplementedError("Shakespeare not implemented yet")
+
+@dataclass
+class BBSamplerConfig(BaseConfig):
+    k: int = 2
+    marginal: torch.Tensor = None
+    trans_mat: torch.Tensor = None
+    show_mask: bool = False
+    shakespeare: bool = False
+
+    def __post_init__(self):
+        self.marginal = torch.ones((self.vocab_size-1,)) / (self.vocab_size-1)
+        if not self.shakespeare:
+            dirichlet_dist = torch.distributions.Dirichlet(torch.ones(self.vocab_size-1))
+            self.trans_mat = dirichlet_dist.sample((self.vocab_size-1,))  # Shape: (num_states_order, num_states)
+            self.trans_mat /= self.trans_mat.sum(dim=1, keepdim=True)
+        else:
+            raise NotImplementedError("Shakespeare not implemented yet")
         
     

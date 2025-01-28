@@ -2,8 +2,12 @@ import matplotlib.pyplot as plt
 import os
 import shutil
 from PIL import Image
+import torch
+import numpy as np
 
-def get_loss_plots(config, train_losses, eval_losses, eval_steps, ngramLosses, task_name):
+def get_loss_plots(config, train_results, task_name):
+    train_losses, eval_losses, eval_steps = train_results["train_losses"], train_results["eval_losses"], train_results["eval_steps"]
+    ngramLosses = train_results["ngramLosses"]
     plt.figure(figsize=(8, 6))
     plt.plot(range(1, config.num_epochs + 1), train_losses, 
             linestyle='-', color='lightblue', label='Training Loss')
@@ -22,7 +26,6 @@ def get_loss_plots(config, train_losses, eval_losses, eval_steps, ngramLosses, t
     for i in range(3, len(ngramLosses)):
         plt.plot(range(1, config.num_epochs + 1), ngramLosses[i], 
                 linestyle='-', label=f'{i+1}-gram Loss')
-
     
     plt.xlabel('Epochs')
     plt.ylabel('Loss')
@@ -33,7 +36,9 @@ def get_loss_plots(config, train_losses, eval_losses, eval_steps, ngramLosses, t
     plt.grid()
     plt.show()
 
-def plot_probes(probes, config):
+
+def plot_probes(train_results, config):
+    probes = train_results["probes"]
     plt.figure(figsize=(8, 6))
     for pkey in probes.keys():
         plt.plot(range(1, config.num_epochs + 1), probes[pkey], 
@@ -48,7 +53,9 @@ def plot_probes(probes, config):
     plt.grid()
     plt.show()
 
-def get_attn_gif(layer, head, attn_maps, config, folder="attns"):
+
+def get_attn_gif(layer, head, train_results, config, folder="attns"):
+    attn_maps = train_results["attn_maps"]
     image_paths = []
     os.makedirs(folder)
     for i, attn in attn_maps.items():
@@ -95,4 +102,20 @@ def get_pos_sim(config, model):
     similar = pos_emb @ pos_emb.t()
     similar = similar.detach().cpu()
     plt.imshow(np.abs(similar))
+    plt.show()
+
+def plot_bigram_icl_risk(config, train_results, task_name):
+    plt.figure(figsize=(8, 6))
+    plt.plot(range(1, config.num_epochs + 1), train_results["bigram_losses"], 
+            linestyle='-', label='Bigram Risk')
+    plt.plot(range(1, config.num_epochs + 1), train_results["icl_losses"], 
+             linestyle='--', label='ICL Risk')
+    plt.xscale('log')
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    mlp = "no" if config.mlp == False else "with"
+    linear = "(linear)" if config.activation == False else "" 
+    plt.title(f'{task_name}: {config.num_heads} Heads {config.num_layers} Layers {mlp} MLP {linear} Loss Over Epochs ({config.pos_enc})')
+    plt.legend()
+    plt.grid()
     plt.show()
