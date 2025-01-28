@@ -115,12 +115,74 @@ class BiettiTask:
         return samples
 
 
-       
-            
+# Bigram Backcopy task: https://arxiv.org/pdf/2410.13835
+class BBTask:
+    def __init__(self, config):
+        self.seq_len = config.seq_len
+        self.num_states = config.vocab_size-1
+        self.bos = self.num_states
+        self.marginal = config.marginal
+        self.trans_mat = config.trans_mat
+        self.batch_size = config.batch_size
+        self.test_size = config.test_size
+        self.k = config.k
+        self.seed = config.seed
+        self.show_mask = config.show_mask
+        # fixed triggers
+        self.q_toks = torch.multinomial(self.marginal, self.k, replacement=False)  # Shape: (k,)
+        # initial probability without triggers
+        self.init_prob = self.marginal.clone()
+        self.init_prob[self.q_toks] = 0.
+        self.init_prob /= self.init_prob.sum() 
+    
+    def generate(self, mode="train"):
+        if self.seed is not None:
+            torch.manual_seed(self.seed)
+        num_samples = self.batch_size if mode == "train" else self.test_size
+
+        # Initialize the samples tensor
+        samples = torch.zeros((num_samples, self.seq_len), dtype=torch.long)
+        output_mask = torch.zeros((num_samples, self.seq_len), dtype=torch.long)
+
+         # Initialize the state to be BOS
+        prev_tokens = torch.ones((num_samples,), dtype=torch.long) * self.bos
+        samples[:, 0] = prev_tokens
+        current_tokens = torch.multinomial(self.init_prob.repeat(num_samples, 1), num_samples=1).squeeze()
+        samples[:, 1] = current_tokens
+        
+        for t in range(2, self.seq_len):
+            # Check if current_tokens are in q_toks
+            is_trigger = torch.isin(current_tokens, self.q_toks)
+
+            # Prepare next tokens
+            nxt_tokens = torch.full((num_samples,), -1, dtype=torch.long)  # Placeholder for next tokens
+            nxt_tokens[is_trigger] = prev_tokens[is_trigger]
+            output_mask[is_trigger, t-1] = 1  # Update output mask
+
+            not_trigger_indices = torch.nonzero(~is_trigger).squeeze(1)
+            if not_trigger_indices.dim() > 0 and len(not_trigger_indices) > 0:  # Avoid empty sampling
+                # Get the current token indices for rows of the transition matrix
+                transition_rows = current_tokens[not_trigger_indices]
+                # Sample new tokens for non-trigger indices
+                sampled_tokens = torch.multinomial(self.trans_mat[transition_rows], 1).squeeze()
+                nxt_tokens[not_trigger_indices] = sampled_tokens
+                
+
+            # Update result for time step t
+            samples[:, t] = nxt_tokens
+
+            # Prepare for the next iteration
+            prev_tokens, current_tokens = current_tokens.clone(), nxt_tokens.clone()
+        
+        if self.show_mask:
+            return samples, output_mask
+        
+        return samples
 
 
 
 # Empirical n-gram learner
+# TODO: it seems that the learner behaves a bit wierdly, need to check the implementation
 class ngramLearner:
     def __init__(self, vocab_size, order):
         self.order = order

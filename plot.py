@@ -40,7 +40,7 @@ def plot_probes(probes, config):
                 linestyle='-', label=f'{pkey}')
     
     plt.xlabel('Epochs')
-    plt.ylabel('Mempry Recall')
+    plt.ylabel('Mempry Recall & KL divergence')
     mlp = "no" if config.mlp == False else "with"
     linear = "(linear)" if config.activation == False else "" 
     plt.title(f'{config.num_heads} Heads {config.num_layers} Layers {mlp} MLP {linear} Recall Over Epochs ({config.pos_enc})')
@@ -87,3 +87,12 @@ def get_attn_gif(layer, head, attn_maps, config, folder="attns"):
         print(f"Folder '{folder}' does not exist.")
     except OSError as e:
         print(f"Error removing folder '{folder}': {e}")
+
+
+def get_pos_sim(config, model):
+    range_pos_toks = torch.arange(config.seq_len).to(config.device)
+    pos_emb = model.positional_encoding(range_pos_toks)
+    similar = pos_emb @ pos_emb.t()
+    similar = similar.detach().cpu()
+    plt.imshow(np.abs(similar))
+    plt.show()

@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from helper import print_once
 
 #################
 # Bietti Probes #
@@ -34,3 +33,10 @@ def memory_recall_probe(num_tokens, model, to_probe, seq_len=None, device='cpu')
         k = model.layers[0].MHA.key(pe[:-1,:]) # (T-1, D)
         q = model.layers[0].MHA.query(pe[1:,:]) # (T-1, D)
         return ((q@k.t()).argmax(-1)==range_pos_toks[:seq_len-1]).float().mean().item()
+
+def feedforward_probe(num_tokens, model, trans_mat, device='cpu'):
+    range_toks = torch.arange(num_tokens).to(device)
+    toks = model.embed(range_toks)
+    toks = model.layers[1].mlp(toks)
+    toks = model.output_layer(toks)
+    return F.kl_div(F.log_softmax(toks, dim=1), trans_mat[range_toks], reduction='batchmean').item()
