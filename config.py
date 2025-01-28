@@ -32,7 +32,7 @@ class Config(BaseConfig):
     pos_max_len: int = 32
 
     # Attention
-    flash: bool = False
+    flash: bool = True
 
     # Training
     learning_rate: float = 3e-4

@@ -13,7 +13,7 @@ from torch import nn, Tensor
 from torch.nn import functional as F
 from typing import List, Optional, Tuple
 from pos_encoder import *
-from attention import *
+# from attention import *
 
 
 class MultiHeadAttention(nn.Module):
@@ -41,9 +41,9 @@ class MultiHeadAttention(nn.Module):
         self.seq_len = config.seq_len
         self.scale = self.head_dim ** 0.5
         self.flash = config.flash
+        self.counter = 0
+        self.dropout = config.dropout if config.dropout else 0.
         assert not (self.flash and self.pos_enc == "rpe"), "Flash Attention does not support RPE currently."  
-        if self.flash:
-            self.flashAttend = FlashAttend(config)
         if self.pos_enc == "rpe":
             self.PEK = RelativePositionalEncoding(self.head_dim, self.pos_max_len) # (T,T,D)
             self.PEV = RelativePositionalEncoding(self.head_dim, self.pos_max_len) # (T,T,D)
@@ -61,9 +61,13 @@ class MultiHeadAttention(nn.Module):
         if self.pos_enc == "rotary":
             Q = self.rotary_emb(Q)
             K = self.rotary_emb(K)
-        if self.flash:
-            assert self.get_attn == 0, "Flash Attention does not output attentions."
-            return self.flashAttend(Q, K, V)
+        if self.flash and (self.get_attn==0 or (self.counter % self.get_attn != 0)):
+            # assert self.get_attn == 0, "Flash Attention does not output attentions."
+            out = F.scaled_dot_product_attention(Q, K, V, attn_mask=None, dropout_p=self.dropout, is_causal=True)
+            out = out.transpose(1,2).contiguous().view(batch_size,seq_len,-1) # (B,T,C)
+            out = self.out(out)
+            self.counter += 1
+            return out, -1
         
         attn_score = Q @ K.transpose(-1,-2) / self.scale # (B,H,T,T)
         if self.pos_enc == "rpe":
@@ -85,9 +89,12 @@ class MultiHeadAttention(nn.Module):
             out += out2
         out = out.transpose(1,2).contiguous().view(batch_size,seq_len,-1) # (B,T,C)
         out = self.out(out)
-        if self.get_attn > 0:
+        if self.get_attn > 0 and (self.counter % self.get_attn == 0):
+            self.counter += 1
             return out, attn.detach().cpu() 
-        return out
+        
+        self.counter += 1
+        return out, -1
         
         
 
@@ -98,7 +105,7 @@ class TFBlock(nn.Module):
         self.ln1 = nn.LayerNorm(config.emb_dim) if config.layer_norm else None
         self.mlp = None
         self.dropout = None
-        self.get_attn = config.get_attn
+        # self.get_attn = config.get_attn
 
         if config.mlp:
             assert config.ff_dim is not None, "FeedForward dimension cannot be empty."
@@ -113,11 +120,11 @@ class TFBlock(nn.Module):
             self.dropout = nn.Dropout(config.dropout)
 
     def forward(self, x):
-        attn_map = None
-        if self.get_attn:
-            atten_out, attn_map = self.MHA(x)
-        else:
-            atten_out = self.MHA(x)
+        attn_map = -1
+        # if self.get_attn:
+        atten_out, attn_map = self.MHA(x)
+        #else:
+        #    atten_out = self.MHA(x)
         x = x + self.dropout(atten_out) if self.dropout else x + atten_out
         if self.ln1 is not None:
             x = self.ln1(x)
@@ -127,20 +134,26 @@ class TFBlock(nn.Module):
                 x = self.ln2(x + self.dropout(mlp_out))
             else:
                 x = self.ln2(x + mlp_out)
-        if self.get_attn > 0:
-            return x, attn_map 
-        return x
+        #if self.get_attn > 0:
+        return x, attn_map 
+        #return x
         
 class Transformer(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.embed = nn.Embedding(config.vocab_size, config.emb_dim).to(config.device)
-        self.positional_encoding = nn.Parameter(torch.zeros(1, config.seq_len, config.emb_dim)).to(config.device)
-        self.layers = nn.ModuleList([TFBlock(config) for _ in range(config.num_layers)])
+        self.pos_enc = config.pos_enc
+        if config.pos_enc == "abs":
+            self.positional_encoding = nn.Embedding(config.seq_len, config.emb_dim)
+        if len(config.mlp) > 1:
+            self.layers = nn.ModuleList([TFBlock(config, layer) for layer in range(config.num_layers)])
+        else:
+            self.layers = nn.ModuleList([TFBlock(config) for _ in range(config.num_layers)])
+
         self.output_layer = nn.Linear(config.emb_dim, config.vocab_size)
-        self.get_attn = config.get_attn
-        if config.get_attn > 0:
-            self.atten_maps = torch.zeros((config.num_layers, config.num_heads, config.seq_len, config.seq_len))
+        # self.get_attn = config.get_attn
+        # if config.get_attn > 0:
+        self.atten_maps = torch.zeros((config.num_layers, config.num_heads, config.seq_len, config.seq_len))
 
     def forward(self, x):
         if self.pos_enc == "abs":
@@ -148,13 +161,14 @@ class Transformer(nn.Module):
         else:
             x = self.embed(x)
         for i, layer in enumerate(self.layers):
-            if self.get_attn > 0:
-                x, attn_map = layer(x)
+            # if self.get_attn > 0:
+            x, attn_map = layer(x)
+            if torch.is_tensor(attn_map) > 0:
                 self.atten_maps[i] = attn_map.mean(dim=0)
-            else:
-                x = layer(x)
+            # else:
+            #    x = layer(x)
             
         logits = self.output_layer(x)
-        if self.get_attn > 0: 
-            return logits, self.atten_maps 
-        return logits
+        # if self.get_attn > 0: 
+        return logits, self.atten_maps 
+        #return logits
