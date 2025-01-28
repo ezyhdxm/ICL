@@ -35,11 +35,11 @@ class Config(BaseConfig):
     flash: bool = False
 
     # Training
-    learning_rate: float = 1e-3
+    learning_rate: float = 3e-4
     num_epochs: int = 1000
     eval_iter: int = 50
     get_attn: int = 50
-    weight_decay: float = 1e-4
+    weight_decay: float = 1e-2
     freeze_value: bool = False
     freeze_out: bool = False
     identity_query: bool = False
