@@ -1,13 +1,14 @@
 import torch
+from typing import Optional, List, Tuple
 
 class InContextTreeTorch:
-    def __init__(self, vocab_size, dag, alpha=0.1):
+    def __init__(self, vocab_size: int, dag: torch.Tensor, alpha: float=0.1)->None:
         assert torch.all(dag < torch.arange(len(dag))), "Invalid DAG structure"
         self.vocab_size = vocab_size
         self.dag = dag
         self.alpha = alpha
 
-    def get_stationary(self, pi):
+    def get_stationary(self, pi: torch.Tensor)->torch.Tensor:
         """
         Compute the stationary distribution of a batch of transition matrices. Cannot be jitted due to dynamic tensor shape
         Args:
@@ -22,7 +23,7 @@ class InContextTreeTorch:
         mu = torch.abs(v[:, -1, :])  # Last singular vector for each matrix
         return mu / mu.sum(dim=1, keepdim=True)
 
-    def sample_batch(self, batch_size, seed=None):
+    def sample_batch(self, batch_size: int, seed: Optional[int]=None)->Tuple[torch.Tensor, torch.Tensor]:
         """
         Sample a batch of sequences from the InContextTree.
         Args:
@@ -66,4 +67,43 @@ class InContextTreeTorch:
         y = pi[torch.arange(batch_size), test_tokens]  # Probabilities of test tokens
 
         return x, y
+
+class InContextDAGTorch:
+    def __init__(self, vocab_size: int, dag: List[List[int]], alpha: float=0.1)->None:
+        for i, p in enumerate(dag):
+            assert max(p, default=-1) < i, "Invalid DAG structure"
+        self.vocab_size = vocab_size
+        self.dag = dag
+        self.alpha = alpha
+        self.num_parents = set(len(p) for p in dag)
+    
+    def sample_batch(self, batch_size: int)->Tuple[torch.Tensor, torch.Tensor]:
+        pi = {}
+        pi[0] = torch.ones((batch_size, self.vocab_size)) / self.vocab_size # uniform initialization
+        prior = self.alpha * torch.ones(self.vocab_size)
+        dirichlet = torch.distributions.Dirichlet(prior)
+        for k in self.num_parents:
+            if k == 0:
+                continue
+            num_states_order = self.vocab_size ** k
+            pi[k] = dirichlet.sample((batch_size, num_states_order)) # Shape: (batch_size, vocab_size**k, vocab_size)
+            pi[k] /= pi[k].sum(dim=-1, keepdim=True)
+
+        samples = torch.zeros((batch_size, len(self.dag)-1), dtype=torch.long)
+
+        for i in range(len(self.dag)):
+            k = len(self.dag[i])
+            if k == 0:
+                p = pi[0]
+            else:
+                parents = samples[:, self.dag[i]]
+                # print("Parents:", parents.numpy())
+                parents_indices = torch.sum(parents * (self.vocab_size ** torch.arange(k-1, -1, -1, device=parents.device)), dim=1)
+                # print("Indexes:", parents_indices.numpy())
+                p = pi[k][torch.arange(batch_size), parents_indices]
+            
+            if i != len(self.dag)-1:
+                samples[:, i] = torch.multinomial(p, num_samples=1).squeeze()
+        
+        return samples, p
 
