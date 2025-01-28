@@ -1,6 +1,10 @@
 import torch
 import torch.nn.functional as F
 
+
+# TODO: Add ICL Markov sampler
+# TODO: Add causal graph
+
 # Simple Markov chain sampler
 class MarkovSampler:
     def __init__(self, config):
@@ -44,6 +48,7 @@ class MarkovSampler:
 
 # Bigram data task: https://arxiv.org/pdf/2306.00802
 # By vectorization, our implemetation is much faster compared to the original implementation.
+# TODO: add ICL accuracy
 class BiettiTask:
     def __init__(self, config):
         self.seq_len = config.seq_len
@@ -116,6 +121,7 @@ class BiettiTask:
 
 
 # Bigram Backcopy task: https://arxiv.org/pdf/2410.13835
+# TODO: Add backcopy risk and bigram risk, add attention visualization
 class BBTask:
     def __init__(self, config):
         self.seq_len = config.seq_len

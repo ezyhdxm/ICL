@@ -3,6 +3,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+# TODO: Add MLA, MQA, GQA
+
 class FlashAttend(nn.Module):
     def __init__(self, config):
         super().__init__()
