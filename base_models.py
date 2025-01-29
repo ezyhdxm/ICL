@@ -151,8 +151,6 @@ class Transformer(nn.Module):
             self.layers = nn.ModuleList([TFBlock(config) for _ in range(config.num_layers)])
 
         self.output_layer = nn.Linear(config.emb_dim, config.vocab_size)
-        # self.get_attn = config.get_attn
-        # if config.get_attn > 0:
         self.atten_maps = torch.zeros((config.num_layers, config.num_heads, config.seq_len, config.seq_len))
 
     def forward(self, x):
@@ -161,14 +159,9 @@ class Transformer(nn.Module):
         else:
             x = self.embed(x)
         for i, layer in enumerate(self.layers):
-            # if self.get_attn > 0:
             x, attn_map = layer(x)
             if torch.is_tensor(attn_map) > 0:
                 self.atten_maps[i] = attn_map.mean(dim=0)
-            # else:
-            #    x = layer(x)
             
         logits = self.output_layer(x)
-        # if self.get_attn > 0: 
         return logits, self.atten_maps 
-        #return logits

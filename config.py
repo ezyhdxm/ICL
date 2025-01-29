@@ -58,6 +58,12 @@ class MarkovSamplerConfig(BaseConfig):
     order: int = 2
     alpha: float = 1
 
+
+@dataclass
+class CausalGraphConfig(BaseConfig):
+    alpha: float = 1
+    dag: list = None
+
 @dataclass
 class BiettiSamplerConfig(BaseConfig):
     k: int = 2

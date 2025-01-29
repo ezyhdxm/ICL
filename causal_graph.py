@@ -1,5 +1,6 @@
 import torch
 from typing import Optional, List, Tuple
+from config import CausalGraphConfig
 
 class InContextTreeTorch:
     def __init__(self, vocab_size: int, dag: torch.Tensor, alpha: float=0.1)->None:
@@ -69,27 +70,31 @@ class InContextTreeTorch:
         return x, y
 
 class InContextDAGTorch:
-    def __init__(self, vocab_size: int, dag: List[List[int]], alpha: float=0.1)->None:
+    def __init__(self, config: CausalGraphConfig)->None:
         for i, p in enumerate(dag):
             assert max(p, default=-1) < i, "Invalid DAG structure"
-        self.vocab_size = vocab_size
-        self.dag = dag
-        self.alpha = alpha
+        self.vocab_size = config.vocab_size
+        self.dag = config.dag
+        self.alpha = config.alpha
         self.num_parents = set(len(p) for p in dag)
+        self.batch_size = config.batch_size
+        self.test_size = config.test_size
+        self.device = config.device
     
-    def sample_batch(self, batch_size: int)->Tuple[torch.Tensor, torch.Tensor]:
+    def generate(self, mode: str)->Tuple[torch.Tensor, torch.Tensor]:
+        num_samples = self.batch_size if mode == "train" else self.test_size
         pi = {}
-        pi[0] = torch.ones((batch_size, self.vocab_size)) / self.vocab_size # uniform initialization
+        pi[0] = torch.ones((num_samples, self.vocab_size)) / self.vocab_size # uniform initialization
         prior = self.alpha * torch.ones(self.vocab_size)
         dirichlet = torch.distributions.Dirichlet(prior)
         for k in self.num_parents:
             if k == 0:
                 continue
             num_states_order = self.vocab_size ** k
-            pi[k] = dirichlet.sample((batch_size, num_states_order)) # Shape: (batch_size, vocab_size**k, vocab_size)
+            pi[k] = dirichlet.sample((num_samples, num_states_order)) # Shape: (batch_size, vocab_size**k, vocab_size)
             pi[k] /= pi[k].sum(dim=-1, keepdim=True)
 
-        samples = torch.zeros((batch_size, len(self.dag)-1), dtype=torch.long)
+        samples = torch.zeros((num_samples, len(self.dag)-1), dtype=torch.long)
 
         for i in range(len(self.dag)):
             k = len(self.dag[i])
@@ -97,10 +102,8 @@ class InContextDAGTorch:
                 p = pi[0]
             else:
                 parents = samples[:, self.dag[i]]
-                # print("Parents:", parents.numpy())
-                parents_indices = torch.sum(parents * (self.vocab_size ** torch.arange(k-1, -1, -1, device=parents.device)), dim=1)
-                # print("Indexes:", parents_indices.numpy())
-                p = pi[k][torch.arange(batch_size), parents_indices]
+                parents_indices = torch.sum(parents * (self.vocab_size ** torch.arange(k-1, -1, -1, device=self.device)), dim=1)
+                p = pi[k][torch.arange(num_samples), parents_indices]
             
             if i != len(self.dag)-1:
                 samples[:, i] = torch.multinomial(p, num_samples=1).squeeze()
