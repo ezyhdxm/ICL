@@ -7,7 +7,7 @@ import numpy as np
 
 def get_loss_plots(config, train_results, task_name):
     train_losses, eval_losses, eval_steps = train_results["train_losses"], train_results["eval_losses"], train_results["eval_steps"]
-    ngramLosses = train_results["ngramLosses"]
+    ngramLosses = train_results["ngramLosses"] if "ngramLosses" in train_results else []
     plt.figure(figsize=(8, 6))
     plt.plot(range(1, config.num_epochs + 1), train_losses, 
             linestyle='-', color='lightblue', label='Training Loss')

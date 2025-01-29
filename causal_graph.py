@@ -32,7 +32,7 @@ class InContextTreeTorch:
             seed (int, optional): Random seed for reproducibility.
         Returns:
             torch.Tensor: Sampled sequences of shape (batch_size, len(dag) + 1).
-            torch.Tensor: Probabilities associated with the last token of each sequence.
+            torch.Tensor: Probabilities associated with the last token of each sequence. (batch_size, vocab_size).
         """
         # Set random seed if provided
         if seed is not None:
@@ -71,30 +71,30 @@ class InContextTreeTorch:
 
 class InContextDAGTorch:
     def __init__(self, config: CausalGraphConfig)->None:
-        for i, p in enumerate(dag):
+        for i, p in enumerate(config.dag):
             assert max(p, default=-1) < i, "Invalid DAG structure"
         self.vocab_size = config.vocab_size
         self.dag = config.dag
         self.alpha = config.alpha
-        self.num_parents = set(len(p) for p in dag)
+        self.num_parents = set(len(p) for p in self.dag)
         self.batch_size = config.batch_size
         self.test_size = config.test_size
         self.device = config.device
     
-    def generate(self, mode: str)->Tuple[torch.Tensor, torch.Tensor]:
+    def generate(self, mode: str="train")->Tuple[torch.Tensor, torch.Tensor]:
         num_samples = self.batch_size if mode == "train" else self.test_size
         pi = {}
-        pi[0] = torch.ones((num_samples, self.vocab_size)) / self.vocab_size # uniform initialization
+        pi[0] = torch.ones((num_samples, self.vocab_size), device=self.device) / self.vocab_size # uniform initialization
         prior = self.alpha * torch.ones(self.vocab_size)
         dirichlet = torch.distributions.Dirichlet(prior)
         for k in self.num_parents:
             if k == 0:
                 continue
             num_states_order = self.vocab_size ** k
-            pi[k] = dirichlet.sample((num_samples, num_states_order)) # Shape: (batch_size, vocab_size**k, vocab_size)
+            pi[k] = dirichlet.sample((num_samples, num_states_order)).to(self.device) # Shape: (batch_size, vocab_size**k, vocab_size)
             pi[k] /= pi[k].sum(dim=-1, keepdim=True)
 
-        samples = torch.zeros((num_samples, len(self.dag)-1), dtype=torch.long)
+        samples = torch.zeros((num_samples, len(self.dag)-1), dtype=torch.long).to(self.device)
 
         for i in range(len(self.dag)):
             k = len(self.dag[i])

@@ -13,14 +13,13 @@ from torch import nn, Tensor
 from torch.nn import functional as F
 from typing import List, Optional, Tuple
 from pos_encoder import *
-# from attention import *
 
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, layer=0):
         super().__init__()
         self.emb_dim = config.emb_dim
-        self.n_head = config.num_heads
+        self.n_head = config.num_heads[layer]
         self.head_dim = self.emb_dim // self.n_head
         assert self.emb_dim % self.n_head == 0, "Embedding dimension must be divisible by the number of heads."
         if config.identity_query:
@@ -99,32 +98,32 @@ class MultiHeadAttention(nn.Module):
         
 
 class TFBlock(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, layer=0):
         super().__init__()
-        self.MHA = MultiHeadAttention(config)
+        self.MHA = MultiHeadAttention(config, layer)
         self.ln1 = nn.LayerNorm(config.emb_dim) if config.layer_norm else None
         self.mlp = None
         self.dropout = None
         # self.get_attn = config.get_attn
 
-        if config.mlp:
+        if config.mlp[layer]:
             assert config.ff_dim is not None, "FeedForward dimension cannot be empty."
-            self.mlp = nn.Sequential(
-                nn.Linear(config.emb_dim, config.ff_dim),
-                nn.ReLU(),
-                nn.Linear(config.ff_dim, config.emb_dim)
-            )
-            self.ln2 = nn.LayerNorm(config.emb_dim)
+            if config.activation[layer]:
+                self.mlp = nn.Sequential(
+                    nn.Linear(config.emb_dim, config.ff_dim),
+                    nn.ReLU(),
+                    nn.Linear(config.ff_dim, config.emb_dim)
+                )
+            else:
+                self.mlp = nn.Linear(config.emb_dim, config.ff_dim)
+            self.ln2 = nn.LayerNorm(config.emb_dim) if config.layer_norm else None
             
         if config.dropout:
             self.dropout = nn.Dropout(config.dropout)
 
     def forward(self, x):
         attn_map = -1
-        # if self.get_attn:
         atten_out, attn_map = self.MHA(x)
-        #else:
-        #    atten_out = self.MHA(x)
         x = x + self.dropout(atten_out) if self.dropout else x + atten_out
         if self.ln1 is not None:
             x = self.ln1(x)
@@ -134,9 +133,7 @@ class TFBlock(nn.Module):
                 x = self.ln2(x + self.dropout(mlp_out))
             else:
                 x = self.ln2(x + mlp_out)
-        #if self.get_attn > 0:
         return x, attn_map 
-        #return x
         
 class Transformer(nn.Module):
     def __init__(self, config):
@@ -145,10 +142,9 @@ class Transformer(nn.Module):
         self.pos_enc = config.pos_enc
         if config.pos_enc == "abs":
             self.positional_encoding = nn.Embedding(config.seq_len, config.emb_dim)
-        if len(config.mlp) > 1:
-            self.layers = nn.ModuleList([TFBlock(config, layer) for layer in range(config.num_layers)])
-        else:
-            self.layers = nn.ModuleList([TFBlock(config) for _ in range(config.num_layers)])
+        self.layers = nn.ModuleList([TFBlock(config, layer) for layer in range(config.num_layers)])
+        #else:
+        #    self.layers = nn.ModuleList([TFBlock(config) for _ in range(config.num_layers)])
 
         self.output_layer = nn.Linear(config.emb_dim, config.vocab_size)
         self.atten_maps = torch.zeros((config.num_layers, config.num_heads, config.seq_len, config.seq_len))
