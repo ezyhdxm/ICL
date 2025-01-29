@@ -147,7 +147,7 @@ class Transformer(nn.Module):
         #    self.layers = nn.ModuleList([TFBlock(config) for _ in range(config.num_layers)])
 
         self.output_layer = nn.Linear(config.emb_dim, config.vocab_size)
-        self.atten_maps = torch.zeros((config.num_layers, config.num_heads, config.seq_len, config.seq_len))
+        self.atten_maps = {l: torch.zeros((config.num_heads[l], config.seq_len, config.seq_len)) for l in range(config.num_layers)}
 
     def forward(self, x):
         if self.pos_enc == "abs":

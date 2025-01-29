@@ -4,6 +4,7 @@ import shutil
 from PIL import Image
 import torch
 import numpy as np
+import seaborn as sns
 
 def get_loss_plots(config, train_results, task_name):
     train_losses, eval_losses, eval_steps = train_results["train_losses"], train_results["eval_losses"], train_results["eval_steps"]
@@ -54,7 +55,7 @@ def plot_probes(train_results, config):
     plt.show()
 
 
-def get_attn_gif(layer, head, train_results, config, folder="attns"):
+def get_attn_gif(layer, head, train_results, config, task_name, folder="attns"):
     attn_maps = train_results["attn_maps"]
     image_paths = []
     os.makedirs(folder)
@@ -68,14 +69,14 @@ def get_attn_gif(layer, head, train_results, config, folder="attns"):
         plt.ylabel("Y-axis")
     
         # Save image
-        image_path = f"{folder}/attn_l{config.num_layers}h{config.num_heads}v{config.vocab_size}ep{i}_L{layer}H{head}.png"
+        image_path = f"{folder}/attn_l{config.num_layers}h{config.num_heads[layer]}v{config.vocab_size}ep{i}_L{layer}H{head}{task_name}.png"
         plt.savefig(image_path)
         plt.close()
         image_paths.append(image_path)
     
     # Step 2: Combine images into a GIF
     frames = [Image.open(image_path) for image_path in image_paths]
-    output_gif_path = f"attnmaps_l{config.num_layers}h{config.num_heads}v{config.vocab_size}_L{layer}H{head}.gif"
+    output_gif_path = f"attnmaps_l{config.num_layers}h{config.num_heads[layer]}v{config.vocab_size}_L{layer}H{head}{task_name}.gif"
     
     frames[0].save(
         output_gif_path,
@@ -118,4 +119,9 @@ def plot_bigram_icl_risk(config, train_results, task_name):
     plt.title(f'{task_name}: {config.num_heads} Heads {config.num_layers} Layers {mlp} MLP {linear} Loss Over Epochs ({config.pos_enc})')
     plt.legend()
     plt.grid()
+    plt.show()
+
+def plot_adj_heatmap(adj_mat):
+    sns.heatmap(adj_mat, annot=False, cmap='coolwarm', fmt='.2f', linewidths=0.5)
+    plt.title('Matrix Heatmap')
     plt.show()

@@ -6,6 +6,7 @@ from collections import defaultdict
 from causal_graph import *
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from util import *
+import copy
 
 def get_sampler(sampler_config, task_name):
     if task_name == "markov":
@@ -34,6 +35,8 @@ def get_bigram_icl_loss(outputs, targets, out_mask, criterion):
 def get_train_result(**kwargs):
     return kwargs
 
+
+
 def train_causal(model, config, sampler_config, task_name):
     sampler = get_sampler(sampler_config, task_name)
     train_losses, eval_losses, eval_steps = [], [], []
@@ -57,7 +60,7 @@ def train_causal(model, config, sampler_config, task_name):
         
         if config.get_attn > 0 and epoch % config.get_attn == 0:
             outputs, attn = model(x.to(config.device))
-            attn_maps[epoch] = attn.clone()
+            attn_maps[epoch] = copy.deepcopy(attn)
         else:
             outputs, _ = model(x.to(config.device))
 
@@ -82,6 +85,8 @@ def train_causal(model, config, sampler_config, task_name):
                             eval_losses=eval_losses, 
                             eval_steps=eval_steps, 
                             attn_maps=attn_maps, sampler=sampler)
+
+
 
 def train_markov(model, config, sampler_config):
     sampler = MarkovSampler(sampler_config)
@@ -108,7 +113,7 @@ def train_markov(model, config, sampler_config):
 
         if config.get_attn > 0 and epoch % config.get_attn == 0:
             outputs, attn = model(batch.to(config.device))
-            attn_maps[epoch] = attn.clone()
+            attn_maps[epoch] = copy.deepcopy(attn)
         else:
             outputs, _ = model(batch.to(config.device))
 
@@ -172,7 +177,7 @@ def train_bietti(model, config, sampler_config):
         
         if config.get_attn > 0 and epoch % config.get_attn == 0:
             outputs, attn = model(batch.to(config.device))
-            attn_maps[epoch] = attn.clone()
+            attn_maps[epoch] = copy.deepcopy(attn)
         else:
             outputs, _ = model(batch.to(config.device))
 
@@ -222,7 +227,7 @@ def train_bietti(model, config, sampler_config):
                             probes=probes,
                             bigram_losses=bigram_losses,
                             icl_losses=icl_losses,
-                            ngramLosses=ngramLosses)
+                            )
 
 
 def train_bb(model, config, sampler_config):
@@ -254,7 +259,7 @@ def train_bb(model, config, sampler_config):
         
         if config.get_attn > 0 and epoch % config.get_attn == 0:
             outputs, attn = model(batch.to(config.device))
-            attn_maps[epoch] = attn.clone()
+            attn_maps[epoch] = copy.deepcopy(attn)
         else:
             outputs, _ = model(batch.to(config.device))
 
@@ -290,7 +295,6 @@ def train_bb(model, config, sampler_config):
                             eval_losses=eval_losses, 
                             eval_steps=eval_steps, 
                             attn_maps=attn_maps, 
-                            ngramLosses=ngramLosses,
                             bigram_losses=bigram_losses,
                             icl_losses=icl_losses,
                             ngramLosses=ngramLosses)

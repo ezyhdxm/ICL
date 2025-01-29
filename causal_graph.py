@@ -1,13 +1,41 @@
 import torch
 from typing import Optional, List, Tuple
 from config import CausalGraphConfig
+import numpy as np
+
+def dag_to_adj(dag):
+    seq_len = len(dag)
+    adj_mat = torch.zeros((seq_len, seq_len), dtype=torch.float)
+    py_dag = torch.tensor(dag)
+    idx = torch.where(py_dag >= 0)[0]  # Indices where dag[i] >= 0 (has a parent)
+    adj_mat[idx, py_dag[idx]] = 1  # Set adjacency matrix entries to 1
+    return adj_mat
+
+def get_random_DAG(seq_len, p=0.5):
+    # Generate random parent indices (excluding last node)
+    random_parents = np.random.randint(np.zeros(seq_len-2), np.arange(1, seq_len - 1))  # Shape: (seq_len - 2,)
+    
+    # Insert -1 as the first parent
+    dag = np.insert(random_parents, 0, -1)  # Shape: (seq_len - 1,)
+
+    # Generate a mask: 1 with probability p, 0 otherwise
+    mask = np.random.choice([True, False], size=seq_len-1, p=[p, 1 - p])
+
+    # Apply the mask: set to -1 where mask == 1
+    dag = np.where(mask, -1, dag)
+
+    return dag
 
 class InContextTreeTorch:
-    def __init__(self, vocab_size: int, dag: torch.Tensor, alpha: float=0.1)->None:
-        assert torch.all(dag < torch.arange(len(dag))), "Invalid DAG structure"
-        self.vocab_size = vocab_size
-        self.dag = dag
-        self.alpha = alpha
+    def __init__(self, config:CausalGraphConfig)->None:
+        self.dag = config.dag
+        assert np.all(self.dag < np.arange(len(self.dag))), "Invalid DAG structure"
+        self.vocab_size = config.vocab_size
+        self.alpha = config.alpha
+        self.batch_size = config.batch_size
+        self.test_size = config.test_size
+        self.device = config.device
+        self.seed = config.seed
 
     def get_stationary(self, pi: torch.Tensor)->torch.Tensor:
         """
@@ -17,14 +45,13 @@ class InContextTreeTorch:
         Returns:
             torch.Tensor: Stationary distributions of shape (batch_size, vocab_size).
         """
-        batch_size, vocab_size, _ = pi.shape
         pi_t = pi.transpose(1, 2)  # Transpose each matrix
-        svd_input = pi_t - torch.eye(vocab_size, device=pi.device).unsqueeze(0)
+        svd_input = pi_t - torch.eye(self.vocab_size, device=self.device).unsqueeze(0)
         _, _, v = torch.linalg.svd(svd_input)
         mu = torch.abs(v[:, -1, :])  # Last singular vector for each matrix
         return mu / mu.sum(dim=1, keepdim=True)
 
-    def sample_batch(self, batch_size: int, seed: Optional[int]=None)->Tuple[torch.Tensor, torch.Tensor]:
+    def generate(self, mode="train")->Tuple[torch.Tensor, torch.Tensor]:
         """
         Sample a batch of sequences from the InContextTree.
         Args:
@@ -35,13 +62,15 @@ class InContextTreeTorch:
             torch.Tensor: Probabilities associated with the last token of each sequence. (batch_size, vocab_size).
         """
         # Set random seed if provided
-        if seed is not None:
-            torch.manual_seed(seed)
+        if self.seed is not None:
+            torch.manual_seed(self.seed)
+
+        num_samples = self.batch_size if mode == "train" else self.test_size
 
         # Create prior and sample Dirichlet-distributed transition matrices
-        prior = self.alpha * torch.ones(self.vocab_size, device=self.dag.device)
+        prior = self.alpha * torch.ones(self.vocab_size, device=self.device)
         dirichlet = torch.distributions.Dirichlet(prior)
-        pi = dirichlet.sample((batch_size, self.vocab_size))  # Shape: (batch_size, vocab_size, vocab_size)
+        pi = dirichlet.sample((num_samples, self.vocab_size))  # Shape: (batch_size, vocab_size, vocab_size)
         pi /= pi.sum(dim=-1, keepdim=True)  # Normalize to make it a valid transition matrix
 
         # Compute stationary distributions for the batch
@@ -49,25 +78,26 @@ class InContextTreeTorch:
 
         # Initialize sequences (batch_size, sequence_length)
         seq_len = len(self.dag) + 1
-        x = torch.zeros((batch_size, seq_len), dtype=torch.long, device=self.dag.device)
+        samples = torch.zeros((num_samples, seq_len), dtype=torch.long, device=self.device)
 
         # Iterate over the DAG nodes to sample tokens
         for i in range(len(self.dag)):
             if self.dag[i] == -1:  # Root node
                 p = mu  # Use stationary distribution
             else:  # Child node
-                parent_tokens = x[:, self.dag[i]]  # Shape: (batch_size,)
-                p = pi[torch.arange(batch_size), parent_tokens]  # Transition probabilities for parent tokens
+                parent_tokens = samples[:, self.dag[i]]  # Shape: (batch_size,)
+                p = pi[torch.arange(num_samples), parent_tokens]  # Transition probabilities for parent tokens
 
             # Sample tokens for all sequences in the batch
-            x[:, i] = torch.multinomial(p, num_samples=1).squeeze()
+            samples[:, i] = torch.multinomial(p, num_samples=1).squeeze()
 
         # Sample test tokens for the last position
-        test_tokens = torch.randint(self.vocab_size, (batch_size,), device=self.dag.device)
-        x[:, -1] = test_tokens
-        y = pi[torch.arange(batch_size), test_tokens]  # Probabilities of test tokens
+        test_tokens = torch.randint(self.vocab_size, (num_samples,), device=self.device)
+        samples[:, -1] = test_tokens
+        y = pi[torch.arange(num_samples), test_tokens]  # Probabilities of test tokens
 
-        return x, y
+        return samples, y
+
 
 class InContextDAGTorch:
     def __init__(self, config: CausalGraphConfig)->None:
