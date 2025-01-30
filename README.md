@@ -28,3 +28,4 @@ Implemetation of a few ICL experiments.
   year={2024}
 }
 ```
+![dag](./attns_plot/l2h2v3_L0Hbothdag_20250129_195037.gif)

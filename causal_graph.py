@@ -3,12 +3,17 @@ from typing import Optional, List, Tuple
 from config import CausalGraphConfig
 import numpy as np
 
-def dag_to_adj(dag):
+def dag_to_adj(dag, task_name="tree"):
     seq_len = len(dag)
     adj_mat = torch.zeros((seq_len, seq_len), dtype=torch.float)
-    py_dag = torch.tensor(dag)
-    idx = torch.where(py_dag >= 0)[0]  # Indices where dag[i] >= 0 (has a parent)
-    adj_mat[idx, py_dag[idx]] = 1  # Set adjacency matrix entries to 1
+    if task_name == "tree":
+        py_dag = torch.tensor(dag)
+        idx = torch.where(py_dag >= 0)[0]  # Indices where dag[i] >= 0 (has a parent)
+        adj_mat[idx, py_dag[idx]] = 1  # Set adjacency matrix entries to 1
+    else:
+        for i in range(seq_len):
+            if len(dag[i]) > 0:
+                adj_mat[i, dag[i]] = 1 
     return adj_mat
 
 def get_random_DAG(seq_len, p=0.5):
@@ -97,6 +102,20 @@ class InContextTreeTorch:
         y = pi[torch.arange(num_samples), test_tokens]  # Probabilities of test tokens
 
         return samples, y
+    
+    def bayes(self, samples): # samples: (B, seq_len)
+        num_samples, seq_len = samples.shape
+        test_tokens, seq = samples[:,-1], samples[:,:-1] # (B,), (B,seq_len-1)
+        counts = torch.zeros((num_samples, self.vocab_size))
+        for i in range(1, seq_len-1):
+            parent_index = self.dag[i]
+            if parent_index == -1:
+                continue
+            indices = (seq[:,parent_index] == test_tokens).nonzero(as_tuple=True)[0]
+            values = torch.ones_like(indices, dtype=torch.float) 
+            counts.index_put_((indices, seq[indices,i]), values, accumulate=True)
+        counts += self.alpha
+        return counts / counts.sum(dim=-1, keepdim=True)
 
 
 class InContextDAGTorch:
@@ -140,3 +159,18 @@ class InContextDAGTorch:
         
         return samples, p
 
+    def bayes(self, samples): # samples: (B, seq_len)
+        num_samples, seq_len = samples.shape
+        last_parents = samples[:,self.dag[-1]]
+        k = last_parents.shape[1]
+        counts = torch.zeros((num_samples, self.vocab_size))
+        for i in range(1, seq_len-1):
+            parent_indexes = self.dag[i]
+            if len(parent_indexes) == k:
+                indices = (samples[:,parent_indexes] == last_parents).all(dim=-1).nonzero(as_tuple=True)[0]
+                if len(indices) == 0:
+                    continue
+                values = torch.ones_like(indices, dtype=torch.float) 
+                counts.index_put_((indices, samples[indices,i]), values, accumulate=True)
+        counts += self.alpha
+        return counts / counts.sum(dim=-1, keepdim=True)

@@ -1,12 +1,13 @@
 from dataclasses import dataclass
 import torch
+from typing import Tuple, Optional
 
 @dataclass
 class BaseConfig:
     # Data
     seq_len: int = 32
     vocab_size: int = 5
-    seed: int = None
+    seed: Optional[int] = None
 
     # Training
     batch_size: int = 256
@@ -17,15 +18,15 @@ class BaseConfig:
 class Config(BaseConfig):
     # Model
     emb_dim: int = 128
-    num_heads: int = 2
     bias: bool = False
-    ff_dim: int = None
+    ff_dim: Optional[int] = None
     num_layers: int = 2
-    dropout: float = None
+    num_heads: Tuple[int] = (1,1)
+    dropout: Optional[float] = None
     mask: bool = True
-    mlp: tuple = (False for _ in range(num_layers))
+    mlp: Tuple[bool] = (False for _ in range(num_layers))
     layer_norm: bool = True
-    activation: tuple = (False for _ in range(num_layers))
+    activation: Tuple[bool] = (False for _ in range(num_layers))
 
     # Positional Encoding
     pos_enc: str = "rotary"
@@ -45,7 +46,7 @@ class Config(BaseConfig):
     identity_query: bool = False
 
     # Scheduler
-    scheduler: str = None
+    scheduler: Optional[str] = None
     T_max: int = 20
     
     # N-Gram

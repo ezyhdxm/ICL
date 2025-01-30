@@ -36,10 +36,10 @@ def get_train_result(**kwargs):
     return kwargs
 
 
-
 def train_causal(model, config, sampler_config, task_name):
     sampler = get_sampler(sampler_config, task_name)
     train_losses, eval_losses, eval_steps = [], [], []
+    bayes_losses = []
     attn_maps = {}
     test_data, test_prob = sampler.generate(mode="test")
 
@@ -50,12 +50,20 @@ def train_causal(model, config, sampler_config, task_name):
     def criterion(logits, probs):
         log_probs = torch.log_softmax(logits, dim=-1)
         return -torch.sum(probs * log_probs, dim=-1).mean()
+    
+    def get_bayes_loss(bayes_prob, prob):
+        return -torch.sum(prob * torch.log(bayes_prob), dim=-1).mean()
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
     
     for epoch in trange(config.num_epochs):
         model.train()
         x, prob = sampler.generate()
+        with torch.no_grad():
+            bayes_prob = sampler.bayes(x)
+            bayes_loss = get_bayes_loss(bayes_prob, prob)
+            bayes_losses.append(bayes_loss.item())
+
         optimizer.zero_grad()
         
         if config.get_attn > 0 and epoch % config.get_attn == 0:
@@ -84,7 +92,7 @@ def train_causal(model, config, sampler_config, task_name):
     return get_train_result(train_losses=train_losses, 
                             eval_losses=eval_losses, 
                             eval_steps=eval_steps, 
-                            attn_maps=attn_maps, sampler=sampler)
+                            attn_maps=attn_maps, sampler=sampler, bayes_losses=bayes_losses)
 
 
 
