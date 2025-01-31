@@ -47,6 +47,51 @@ class MarkovSampler:
         return samples
 
 
+# ICL Markov chain sampler
+class ICLMarkovSampler:
+    def __init__(self, config):
+        self.seq_len = config.seq_len
+        self.num_states = config.vocab_size
+        self.order = config.order
+        self.num_states_order = self.num_states ** self.order
+        self.batch_size = config.batch_size
+        self.test_size = config.test_size
+        self.device = config.device
+        self.alpha = config.alpha
+        self.dirichlet_dist = torch.distributions.Dirichlet(torch.ones(self.num_states).to(self.device)*self.alpha)
+        
+    def generate(self, mode="train"):
+        num_samples = self.batch_size if mode == "train" else self.test_size
+
+        # Sample all transition probabilities in one go
+        trans_matrix = self.dirichlet_dist.sample((num_samples, self.num_states_order,))  # Shape: (num_samples, num_states_order, num_states)
+        trans_matrix /= trans_matrix.sum(dim=1, keepdim=True)
+        
+        # Initialize the samples tensor
+        samples = torch.zeros((num_samples, self.seq_len), dtype=torch.long).to(self.device)
+        
+        # Initialize the state (randomly choose starting states for each sequence)
+        state = torch.randint(high=self.num_states, size=(num_samples, self.order)).to(self.device) # Shape: (num_samples, order)
+        samples[:, :self.order] = state
+            
+        for t in range(self.order, self.seq_len):
+            state_indices = torch.sum(state * (self.num_states ** torch.arange(self.order - 1, -1, -1, device=self.device)), dim=1) #shape: (num_samples,)
+            probs = trans_matrix[torch.arange(num_samples), state_indices, :]  # Shape: (num_samples, num_states)
+            
+            # Sample the next states for the entire batch
+            next_states = torch.multinomial(probs, num_samples=1).squeeze(1)
+            
+            # Update the sequence with the sampled next states
+            samples[:, t] = next_states
+            
+            # Update the state window (shift left and append the new state)
+            state = torch.cat([state[:, 1:], next_states.unsqueeze(1)], dim=1)
+        
+        return samples
+
+
+
+
 # Bigram data task: https://arxiv.org/pdf/2306.00802
 # By vectorization, our implemetation is much faster compared to the original implementation.
 class BiettiTask:

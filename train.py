@@ -96,8 +96,11 @@ def train_causal(model, config, sampler_config, task_name):
 
 
 
-def train_markov(model, config, sampler_config):
-    sampler = MarkovSampler(sampler_config)
+def train_markov(model, config, sampler_config, task_name):
+    if task_name == "markov":
+        sampler = MarkovSampler(sampler_config)
+    elif task_name == "icl-mc":
+        sampler = ICLMarkovSampler(sampler_config)
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
     if config.scheduler is not None:
@@ -153,6 +156,7 @@ def train_markov(model, config, sampler_config):
                             eval_steps=eval_steps, 
                             attn_maps=attn_maps, 
                             ngramLosses=ngramLosses)
+
 
 def train_bietti(model, config, sampler_config):
     sampler = get_sampler(sampler_config, "bietti")
@@ -308,8 +312,8 @@ def train_bb(model, config, sampler_config):
                             ngramLosses=ngramLosses)
 
 def train_model(model, config, sampler_config, task_name):
-    if task_name == "markov":
-        return train_markov(model, config, sampler_config)
+    if task_name in ["markov", "icl-mc"]:
+        return train_markov(model, config, sampler_config, task_name)
     elif task_name == "bietti":
         return train_bietti(model, config, sampler_config)
     elif task_name == "bb":
