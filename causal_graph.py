@@ -36,7 +36,7 @@ class InContextTreeTorch:
         self.dag = config.dag
         assert np.all(self.dag < np.arange(len(self.dag))), "Invalid DAG structure"
         self.vocab_size = config.vocab_size
-        self.alpha = config.alpha
+        self.alpha = config.alpha.to(config.device)
         self.batch_size = config.batch_size
         self.test_size = config.test_size
         self.device = config.device

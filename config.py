@@ -76,8 +76,10 @@ class BiettiSamplerConfig(BaseConfig):
 
     def __post_init__(self):
         self.marginal = torch.ones((self.vocab_size,)) / self.vocab_size
+        self.marginal = self.marginal.to(self.device)
         if not self.shakespeare:
-            dirichlet_dist = torch.distributions.Dirichlet(torch.ones(self.vocab_size))
+            alpha = torch.ones(self.vocab_size).to(self.device)
+            dirichlet_dist = torch.distributions.Dirichlet(alpha)
             self.trans_mat = dirichlet_dist.sample((self.vocab_size,))  # Shape: (num_states_order, num_states)
             self.trans_mat /= self.trans_mat.sum(dim=1, keepdim=True)
         else:
@@ -93,8 +95,10 @@ class BBSamplerConfig(BaseConfig):
 
     def __post_init__(self):
         self.marginal = torch.ones((self.vocab_size-1,)) / (self.vocab_size-1)
+        self.marginal = self.marginal.to(self.device)
         if not self.shakespeare:
-            dirichlet_dist = torch.distributions.Dirichlet(torch.ones(self.vocab_size-1))
+            alpha = torch.ones(self.vocab_size-1).to(self.device)
+            dirichlet_dist = torch.distributions.Dirichlet(alpha)
             self.trans_mat = dirichlet_dist.sample((self.vocab_size-1,))  # Shape: (num_states_order, num_states)
             self.trans_mat /= self.trans_mat.sum(dim=1, keepdim=True)
         else:

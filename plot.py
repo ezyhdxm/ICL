@@ -70,21 +70,38 @@ def onerror(func, path, exc_info):
     """
     # Is the error an access error?
     if not os.access(path, os.W_OK):
-        os.chmod(path, sstat.S_IWRITE)
+        os.chmod(path, stat.S_IWRITE)
         func(path)
     else:
         raise
 
+def remove_readonly(func, path, exc_info):
+    """Handle read-only files while deleting"""
+    os.chmod(path, stat.S_IWRITE)  # Change to writable
+    func(path)  # Retry removal
+
+
 def get_attn_gif(layer, head, train_results, config, task_name, dag=None, folder="attns", out_folder="attns_plot"):
     attn_maps = train_results["attn_maps"]
     image_paths = []
+    if os.path.exists(folder):
+        shutil.rmtree(folder, onexc=remove_readonly)  # Handle read-only files
+        print(f"Deleted: {folder}")
+    
     os.makedirs(folder)
     for i, attn in attn_maps.items():
         if dag is None:
-            plt.figure(figsize=(6, 6))
-            sns.heatmap(attn[layer][head], cmap="viridis", annot=False)
-            plt.colorbar()
-            plt.title(f"Epoch {i + 1}")
+            if head != "all":
+                plt.figure(figsize=(6, 6))
+                sns.heatmap(attn[layer][head], cmap="viridis", annot=False, cbar=True)
+                plt.title(f"Epoch {i + 1}")
+            else:
+                h = config.num_heads[layer]
+                fig, axes = plt.subplots(1, h, figsize=(6*h, 6))
+                for j in range(h):
+                    sns.heatmap(attn[layer][j], ax=axes[j], cmap="viridis", annot=False, cbar=True)
+                    axes[j].set_title(f"Head {j+1} at Epoch {i + 1}")
+                plt.tight_layout()
         else:
             adj_mat = dag_to_adj(dag, task_name)
             if head != "both":
@@ -129,7 +146,7 @@ def get_attn_gif(layer, head, train_results, config, task_name, dag=None, folder
     )
     
     print(f"GIF saved at {output_gif_path}")
-    shutil.rmtree(folder, onerror=onerror)
+    shutil.rmtree(folder, onexc=remove_readonly)
     print(f"Folder '{folder}' and its contents removed.")
 
 def get_pos_sim(config, model):

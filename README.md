@@ -1,5 +1,5 @@
 # ICL
-Implemetation of a few ICL experiments.
+We are interested in understanding how transformers develop the in-context-learning ability through gradient descent. This repo reproduces implemetations of a few ICL experiments. Our implemetation is more efficient compared to some of the original implementations (see the [notebook](./Test.ipynb) for more details). For demostrations of how to run the experiments, see the [notebook](./markov_attn.ipynb). 
 
 ### 📖 Citations
 
@@ -20,6 +20,7 @@ Implemetation of a few ICL experiments.
   year={2024}
 }
 ```
+![etp](./attns_plot/l1h1v23_L0H0bb_20250130_174435.gif)
 ```bibtex
 @article{nichani2024transformers,
   title={How transformers learn causal structure with gradient descent},
@@ -29,3 +30,18 @@ Implemetation of a few ICL experiments.
 }
 ```
 ![dag](./attns_plot/l2h2v3_L0Hbothdag_20250129_195037.gif)
+```bibtex
+@article{rajaraman2024transformers,
+  title={Transformers on markov data: Constant depth suffices},
+  author={Rajaraman, Nived and Bondaschi, Marco and Ramchandran, Kannan and Gastpar, Michael and Makkuva, Ashok Vardhan},
+  journal={arXiv preprint arXiv:2407.17686},
+  year={2024}
+}
+```
+#### Order-2 Markov Chain
+![order2_0](./attns_plot/l2h2v5_L0Hallmarkov_20250130_194437.gif)
+![order2_1](./attns_plot/l2h1v5_L1H0markov_20250130_194705.gif)
+
+#### Order-3 Markov Chain
+![order3_0](./attns_plot/l2h3v3_L0Hallmarkov_20250130_200657.gif)
+![order3_1](./attns_plot/l2h1v5_L1H0markov_20250130_195108.gif)
