@@ -39,9 +39,13 @@ We are interested in understanding how transformers develop the in-context-learn
 }
 ```
 #### Order-2 Markov Chain
+First Layer
 ![order2_0](./attns_plot/l2h2v5_L0Hallmarkov_20250130_194437.gif)
+Second Layer
 ![order2_1](./attns_plot/l2h1v5_L1H0markov_20250130_194705.gif)
 
 #### Order-3 Markov Chain
+First Layer
 ![order3_0](./attns_plot/l2h3v3_L0Hallmarkov_20250130_200657.gif)
+Second Layer
 ![order3_1](./attns_plot/l2h1v5_L1H0markov_20250130_195108.gif)
