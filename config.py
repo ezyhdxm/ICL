@@ -73,14 +73,14 @@ class BiettiSamplerConfig(BaseConfig):
     trans_mat: torch.Tensor = None
     show_mask: bool = False
     shakespeare: bool = False
+    alpha: float = 1
 
     def __post_init__(self):
-        self.marginal = torch.ones((self.vocab_size,)) / self.vocab_size
-        self.marginal = self.marginal.to(self.device)
+        self.marginal = torch.ones((self.vocab_size,), device=self.device) / self.vocab_size
         if not self.shakespeare:
-            alpha = torch.ones(self.vocab_size).to(self.device)
-            dirichlet_dist = torch.distributions.Dirichlet(alpha)
-            self.trans_mat = dirichlet_dist.sample((self.vocab_size,))  # Shape: (num_states_order, num_states)
+            prior = torch.ones(self.vocab_size, device=self.device) * self.alpha
+            dirichlet_dist = torch.distributions.Dirichlet(prior)
+            self.trans_mat = dirichlet_dist.sample((self.vocab_size,))  # Shape: (vocab_size, vocab_size)
             self.trans_mat /= self.trans_mat.sum(dim=1, keepdim=True)
         else:
             raise NotImplementedError("Shakespeare not implemented yet")
@@ -92,14 +92,14 @@ class BBSamplerConfig(BaseConfig):
     trans_mat: torch.Tensor = None
     show_mask: bool = False
     shakespeare: bool = False
+    alpha: float = 1
 
     def __post_init__(self):
-        self.marginal = torch.ones((self.vocab_size-1,)) / (self.vocab_size-1)
-        self.marginal = self.marginal.to(self.device)
+        self.marginal = torch.ones((self.vocab_size-1,), device=self.device) / (self.vocab_size-1)
         if not self.shakespeare:
-            alpha = torch.ones(self.vocab_size-1).to(self.device)
-            dirichlet_dist = torch.distributions.Dirichlet(alpha)
-            self.trans_mat = dirichlet_dist.sample((self.vocab_size-1,))  # Shape: (num_states_order, num_states)
+            prior = torch.ones(self.vocab_size-1, device=self.device) * self.alpha
+            dirichlet_dist = torch.distributions.Dirichlet(prior)
+            self.trans_mat = dirichlet_dist.sample((self.vocab_size-1,))  # Shape: (vocab_size-1, vocab_size-1)
             self.trans_mat /= self.trans_mat.sum(dim=1, keepdim=True)
         else:
             raise NotImplementedError("Shakespeare not implemented yet")

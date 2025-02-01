@@ -1,4 +1,4 @@
-from tqdm import trange
+from tqdm.notebook import trange
 import torch
 import torch.nn as nn  
 from markov import *
@@ -7,6 +7,9 @@ from causal_graph import *
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from util import *
 import copy
+
+
+### TODO: Maybe use a data_loader so that while the model is training, the next batch is being generated 
 
 def get_sampler(sampler_config, task_name):
     if task_name == "markov":
@@ -185,7 +188,7 @@ def train_bietti(model, config, sampler_config):
     test_y = test_data[:,1:].reshape(-1).to(config.device)
     
     if config.ngram:
-        ngramLearnerDict = {i:ngramLearner(config, sampler_config, i) for i in range(config.max_gram)}
+        ngramLearnerDict = {i:ngramLearner(config, sampler_config, i, False) for i in range(config.max_gram)}
         ngramLosses = defaultdict(list)
     
     for epoch in trange(config.num_epochs):
