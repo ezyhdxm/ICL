@@ -4,6 +4,14 @@ We are interested in understanding how transformers develop the in-context-learn
 ### 📖 Citations
 
 ```bibtex
+@article{edelman2024evolution,
+  title={The evolution of statistical induction heads: In-context learning markov chains},
+  author={Edelman, Benjamin L and Edelman, Ezra and Goel, Surbhi and Malach, Eran and Tsilivis, Nikolaos},
+  journal={arXiv preprint arXiv:2402.11004},
+  year={2024}
+}
+```
+```bibtex
 @article{bietti2024birth,
   title={Birth of a transformer: A memory viewpoint},
   author={Bietti, Alberto and Cabannes, Vivien and Bouchacourt, Diane and Jegou, Herve and Bottou, Leon},
