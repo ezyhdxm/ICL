@@ -162,8 +162,8 @@ class BiettiTask:
     def __init__(self, config):
         self.seq_len = config.seq_len
         self.num_states = config.vocab_size
-        self.marginal = config.marginal
-        self.trans_mat = config.trans_mat
+        self.marginal = config.marginal.to(config.device)
+        self.trans_mat = config.trans_mat.to(config.device)
         self.batch_size = config.batch_size
         self.test_size = config.test_size
         self.k = config.k
@@ -184,14 +184,14 @@ class BiettiTask:
         
         # Initialize the samples tensor
         if self.show_latents:
-            samples = torch.zeros((num_samples, self.seq_len+self.k), dtype=torch.long).to(self.device)
+            samples = torch.zeros((num_samples, self.seq_len+self.k), dtype=torch.long, device=self.device)
             samples[:, :self.k] = q_toks
-            output_mask = torch.zeros((num_samples, self.seq_len+self.k), dtype=torch.long).to(self.device)
+            output_mask = torch.zeros((num_samples, self.seq_len+self.k), dtype=torch.long, device=self.device)
             output_mask[:, :self.k] = -1
             off_set = self.k
         else:
-            samples = torch.zeros((num_samples, self.seq_len), dtype=torch.long).to(self.device)
-            output_mask = torch.zeros((num_samples, self.seq_len), dtype=torch.long).to(self.device)
+            samples = torch.zeros((num_samples, self.seq_len), dtype=torch.long, device=self.device)
+            output_mask = torch.zeros((num_samples, self.seq_len), dtype=torch.long, device=self.device)
             off_set = 0
 
          # Initialize the state (randomly choose starting states for each sequence)
@@ -204,7 +204,7 @@ class BiettiTask:
             matched_indices = matches.nonzero(as_tuple=False)  # Indices where matches occur
 
             # Prepare next tokens
-            nxt_tokens = torch.full((num_samples,), -1, dtype=torch.long).to(self.device)  # Placeholder for next tokens
+            nxt_tokens = torch.full((num_samples,), -1, dtype=torch.long, device=self.device)  # Placeholder for next tokens
 
             # Case 1: Replace with o_toks when current_tokens match q_toks
             if matched_indices.size(0) > 0:
@@ -258,14 +258,13 @@ class BBTask:
         num_samples = self.batch_size if mode == "train" else self.test_size
 
         # Initialize the samples tensor
-        samples = torch.zeros((num_samples, self.seq_len), dtype=torch.long).to(self.device)
-        output_mask = torch.zeros((num_samples, self.seq_len), dtype=torch.long).to(self.device)
+        samples = torch.zeros((num_samples, self.seq_len), dtype=torch.long, device=self.device)
+        output_mask = torch.zeros((num_samples, self.seq_len), dtype=torch.long, device=self.device)
 
          # Initialize the state to be BOS
-        prev_tokens = torch.ones((num_samples,), dtype=torch.long) * self.bos
-        prev_tokens = prev_tokens.to(self.device)
+        prev_tokens = torch.ones((num_samples,), dtype=torch.long, device=self.device) * self.bos
         samples[:, 0] = prev_tokens
-        current_tokens = torch.multinomial(self.init_prob.repeat(num_samples, 1), num_samples=1).squeeze()
+        current_tokens = torch.multinomial(self.init_prob.repeat(num_samples, 1).to(self.device), num_samples=1).squeeze()
         samples[:, 1] = current_tokens
         
         for t in range(2, self.seq_len):
@@ -273,7 +272,7 @@ class BBTask:
             is_trigger = torch.isin(current_tokens, self.q_toks)
 
             # Prepare next tokens
-            nxt_tokens = torch.full((num_samples,), -1, dtype=torch.long).to(self.device)  # Placeholder for next tokens
+            nxt_tokens = torch.full((num_samples,), -1, dtype=torch.long, device=self.device) # Placeholder for next tokens
             nxt_tokens[is_trigger] = prev_tokens[is_trigger]
             output_mask[is_trigger, t-1] = 1  # Update output mask
 
@@ -305,7 +304,7 @@ class ngramLearner:
     def __init__(self, config, sampler_config, order, is_icl=False):
         self.order = order
         self.vocab_size = config.vocab_size
-        self.alpha = sampler_config.alpha
+        self.alpha = getattr(sampler_config, "alpha", 1.)
         self.num_states_order = config.vocab_size**self.order
         self.device = config.device
         self.is_icl = is_icl

@@ -185,7 +185,7 @@ def train_bietti(model, config, sampler_config):
     test_y = test_data[:,1:].reshape(-1).to(config.device)
     
     if config.ngram:
-        ngramLearnerDict = {i:ngramLearner(config.vocab_size, i, config.device) for i in range(config.max_gram)}
+        ngramLearnerDict = {i:ngramLearner(config, sampler_config, i) for i in range(config.max_gram)}
         ngramLosses = defaultdict(list)
     
     for epoch in trange(config.num_epochs):
@@ -267,7 +267,7 @@ def train_bb(model, config, sampler_config):
     test_y = test_data[:,1:].reshape(-1).to(config.device)
     
     if config.ngram:
-        ngramLearnerDict = {i:ngramLearner(config.vocab_size, i, config.device) for i in range(config.max_gram)}
+        ngramLearnerDict = {i:ngramLearner(config, sampler_config, i) for i in range(config.max_gram)}
         ngramLosses = defaultdict(list)
     
     for epoch in trange(config.num_epochs):
