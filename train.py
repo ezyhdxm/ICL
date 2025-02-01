@@ -112,7 +112,7 @@ def train_markov(model, config, sampler_config, task_name):
     attn_maps = {}
     ngramLearnerDict, ngramLosses = {}, {}
     test_data = sampler.generate(mode="test")
-    test_y = test_data[:,1:].reshape(-1).to(config.device)
+    test_y = test_data[:,1:].reshape(-1)
 
     if config.ngram:
         ngramLearnerDict = {i:ngramLearner(config, sampler_config, i, is_icl) for i in range(config.max_gram)}
@@ -122,13 +122,13 @@ def train_markov(model, config, sampler_config, task_name):
         model.train()
         batch = sampler.generate() # bottleneck
         optimizer.zero_grad()
-        targets = batch[:,1:].reshape(-1).to(config.device)
+        targets = batch[:,1:].reshape(-1)
 
         if config.get_attn > 0 and epoch % config.get_attn == 0:
-            outputs, attn = model(batch.to(config.device))
+            outputs, attn = model(batch)
             attn_maps[epoch] = copy.deepcopy(attn)
         else:
-            outputs, _ = model(batch.to(config.device))
+            outputs, _ = model(batch)
 
         outputs = outputs[:,:-1,:].reshape(-1, config.vocab_size)
 
@@ -154,7 +154,7 @@ def train_markov(model, config, sampler_config, task_name):
         if epoch % config.eval_iter == 0:
             with torch.no_grad():
                 model.eval()
-                outputs, _ = model(test_data.to(config.device))
+                outputs, _ = model(test_data)
                 outputs = outputs[:,:-1,:].reshape(-1, config.vocab_size)
                 eval_loss = criterion(outputs, test_y)
                 eval_losses.append(eval_loss.item())
