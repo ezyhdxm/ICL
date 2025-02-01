@@ -99,8 +99,10 @@ def train_causal(model, config, sampler_config, task_name):
 def train_markov(model, config, sampler_config, task_name):
     if task_name == "markov":
         sampler = MarkovSampler(sampler_config)
+        is_icl = False
     elif task_name == "icl-mc":
         sampler = ICLMarkovSampler(sampler_config)
+        is_icl = True
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
     if config.scheduler is not None:
@@ -113,7 +115,7 @@ def train_markov(model, config, sampler_config, task_name):
     test_y = test_data[:,1:].reshape(-1).to(config.device)
 
     if config.ngram:
-        ngramLearnerDict = {i:ngramLearner(config.vocab_size, i, config.device) for i in range(config.max_gram)}
+        ngramLearnerDict = {i:ngramLearner(config, sampler_config, i, is_icl) for i in range(config.max_gram)}
         ngramLosses = defaultdict(list)
     
     for epoch in trange(config.num_epochs):
@@ -131,9 +133,15 @@ def train_markov(model, config, sampler_config, task_name):
         outputs = outputs[:,:-1,:].reshape(-1, config.vocab_size)
 
         for i, learner in ngramLearnerDict.items():
-            ngram_loss = learner.loss(batch)
-            ngramLosses[i].append(ngram_loss.item())
-            learner.update(batch)
+            if not is_icl:
+                ngram_loss = learner.loss(batch)
+                ngramLosses[i].append(ngram_loss.item())
+                learner.update(batch)
+            else:
+                learner.update(batch)
+                ngram_loss = learner.loss(batch)
+                ngramLosses[i].append(ngram_loss.item())
+                
         
         loss = criterion(outputs, targets)
         train_losses.append(loss.item())

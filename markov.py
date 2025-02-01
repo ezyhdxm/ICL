@@ -209,7 +209,7 @@ class BBTask:
             is_trigger = torch.isin(current_tokens, self.q_toks)
 
             # Prepare next tokens
-            nxt_tokens = torch.full((num_samples,), -1, dtype=torch.long)  # Placeholder for next tokens
+            nxt_tokens = torch.full((num_samples,), -1, dtype=torch.long).to(self.device)  # Placeholder for next tokens
             nxt_tokens[is_trigger] = prev_tokens[is_trigger]
             output_mask[is_trigger, t-1] = 1  # Update output mask
 
@@ -238,20 +238,27 @@ class BBTask:
 # Empirical n-gram learner
 # TODO: it seems that the learner behaves a bit wierdly, need to check the implementation
 class ngramLearner:
-    def __init__(self, vocab_size, order, device):
+    def __init__(self, config, sampler_config, order, is_icl=False):
         self.order = order
-        self.vocab_size = vocab_size
-        self.num_states_order = vocab_size**order
-        self.device = device
-        if order > 0:
-            self.trans_mat_est = torch.ones((self.num_states_order, self.vocab_size)).to(device) # (num_states_order, num_states)
-            self.state_powers = self.vocab_size ** torch.arange(self.order - 1, -1, -1).to(device)
+        self.vocab_size = config.vocab_size
+        self.alpha = sampler_config.alpha
+        self.num_states_order = config.vocab_size**self.order
+        self.device = config.device
+        self.is_icl = is_icl
+        
+        if self.order > 0:
+            if not is_icl:
+                self.trans_mat_est = torch.ones((self.num_states_order, self.vocab_size)).to(self.device) # (num_states_order, num_states)
+            self.state_powers = self.vocab_size ** torch.arange(self.order - 1, -1, -1).to(self.device)
+            
         else:
-            self.trans_mat_est = torch.ones((self.vocab_size,)).to(device)
+            self.trans_mat_est = torch.ones((self.vocab_size,)).to(self.device)
     
     def update(self, batch): # batch: (B,T)
-        seq_len = batch.size(1)
+        batch_size, seq_len = batch.shape
         if self.order > 0:
+            if self.is_icl:
+                self.trans_mat_est = self.alpha * torch.ones((batch_size, self.num_states_order, self.vocab_size)).to(self.device)
             states = torch.stack([batch[:, t:t + self.order] for t in range(seq_len - self.order)], dim=1)  # (B, T-O, O)
             next_states = batch[:, self.order:]  # (B, T-O)
 
@@ -261,9 +268,18 @@ class ngramLearner:
             # Update transition matrix
             for t in range(state_indices.size(1)):  # Loop over sequence length (T-O)
                 # Add values to the specified positions
-                self.trans_mat_est.index_put_((state_indices[:,t], next_states[:,t]), values, accumulate=True)
+                if not self.is_icl:
+                    self.trans_mat_est.index_put_((state_indices[:,t], next_states[:,t]), values, accumulate=True)
+                else:
+                    self.trans_mat_est.index_put_((torch.arange(batch_size), state_indices[:,t], next_states[:,t]), values, accumulate=True)
+                    
+            self.trans_mat_est /= self.trans_mat_est.sum(dim=-1, keepdim=True)
         else:
-            self.trans_mat_est += torch.bincount(batch.flatten(), minlength=self.vocab_size)
+            if not self.is_icl:
+                self.trans_mat_est += torch.bincount(batch.flatten(), minlength=self.vocab_size)
+            else:
+                bin_counts = torch.stack([torch.bincount(batch[i], minlength=self.vocab_size) for i in range(batch_size)])
+                self.trans_mat_est = bin_counts / bin_counts.sum(dim=-1, keepdim=True)
                 
     def predict(self, batch):
         batch_size, seq_len = batch.size()
@@ -273,18 +289,27 @@ class ngramLearner:
             probs[:,:self.order,:] = uniform.repeat(batch_size, self.order, 1)
             states = torch.stack([batch[:, t:t+self.order] for t in range(seq_len-self.order)], dim=1) # (B, T-O, O)
             state_indices = torch.sum(states * self.state_powers, dim=2)  # (B, T-O)
-            probs[:, self.order:] = self.trans_mat_est[state_indices] / self.trans_mat_est[state_indices].sum(dim=-1, keepdim=True)
+            if not self.is_icl:
+                probs[:, self.order:] = self.trans_mat_est[state_indices] / self.trans_mat_est[state_indices].sum(dim=-1, keepdim=True)
+            else:
+                batch_indices = torch.arange(batch_size).unsqueeze(1)
+                probs[:, self.order:] = self.trans_mat_est[batch_indices, state_indices] 
             return probs
-        else:
-            targets = batch.reshape(-1)
-            probs = self.trans_mat_est / self.trans_mat_est.sum()
-            probs = probs.unsqueeze(0).repeat(targets.size(0), 1)
-            return probs.reshape(batch_size, seq_len, self.vocab_size)
 
+        else:
+            if not self.is_icl:
+                targets = batch.reshape(-1)
+                probs = self.trans_mat_est / self.trans_mat_est.sum()
+                probs = probs.unsqueeze(0).repeat(targets.size(0), 1)
+                return probs.reshape(batch_size, seq_len, self.vocab_size)
+            else:
+                probs = self.trans_mat_est.unsqueeze(1).repeat(1, seq_len, 1)
+                return probs
+            
     def loss(self, batch):
         probs = self.predict(batch)
         one_hot_labels = F.one_hot(batch, num_classes=self.vocab_size).float()
-        loss = -torch.sum(one_hot_labels * torch.log(probs)) / batch.size(0) / (batch.size(1))
+        loss = -torch.sum(one_hot_labels * torch.log(probs)) / (batch.size(0) * batch.size(1))
         return loss
 
 

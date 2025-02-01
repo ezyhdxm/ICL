@@ -35,8 +35,8 @@ class MultiHeadAttention(nn.Module):
         self.dropout = config.dropout if config.dropout else 0.
         assert not (self.flash and self.pos_enc == "rpe"), "Flash Attention does not support RPE currently."  
         if self.pos_enc == "rpe":
-            self.PEK = RelativePositionalEncoding(self.head_dim, self.pos_max_len) # (T,T,D)
-            self.PEV = RelativePositionalEncoding(self.head_dim, self.pos_max_len) # (T,T,D)
+            self.PEK = RelativePositionalEncoding(self.head_dim, config.pos_max_len) # (T,T,D)
+            self.PEV = RelativePositionalEncoding(self.head_dim, config.pos_max_len) # (T,T,D)
         elif self.pos_enc == "rotary":
             self.rotary_emb = RotaryPositionalEmbeddings(self.head_dim, self.pos_max_len)
         elif self.pos_enc == "alibi":
@@ -63,7 +63,7 @@ class MultiHeadAttention(nn.Module):
                 Q2 = self.query(x).view(batch_size, seq_len, self.n_head, self.head_dim).transpose(0,1) # (T,B,H,D)
                 Q2 = Q2.contiguous().view(seq_len, batch_size*self.n_head, self.head_dim) # (T,BH,D)
                 attn_score2 = torch.matmul(Q2, self.PEK(seq_len).transpose(1,2)) # (T,BH,D) @ (T,D,T) -> (T,BH,T)
-                attn_score2 = attn_score2.view(seq_len, batch_size, self.n_head, seq_len).transpose(0,1).contiguous() # (B,H,T,T)
+                attn_score2 = attn_score2.view(seq_len, self.n_head, batch_size, seq_len).transpose(0,2).contiguous() # (B,H,T,T)
                 attn_score += attn_score2 / self.scale
             elif self.pos_enc=="alibi":
                 attn_score += self.alibi_emb(self.seq_len)
@@ -74,7 +74,7 @@ class MultiHeadAttention(nn.Module):
             if self.pos_enc == "rpe":
                 attn2 = attn.transpose(0,2).contiguous().view(seq_len, -1, seq_len) # (T,BH,T)
                 out2 = torch.matmul(attn2, self.PEV(seq_len)) # (T,BH,T) @ (T,T,D) -> (T,BH,D)
-                out2 = out2.view(seq_len, batch_size, -1, self.head_dim).transpose(0,2) # (B,H,T,D)
+                out2 = out2.view(seq_len, -1, batch_size, self.head_dim).transpose(0,2) # (B,H,T,D)
                 out += out2
             out = out.transpose(1,2).contiguous().view(batch_size,seq_len,-1) # (B,T,C)
             out = self.out(out)
