@@ -1,4 +1,4 @@
-from tqdm.notebook import trange
+from tqdm.notebook import trange, tqdm
 import torch
 import torch.nn as nn  
 from markov import *
@@ -10,7 +10,29 @@ import copy
 
 from torch.utils.data import Dataset, DataLoader
 
-### TODO: Use a data_loader to preload part of the simulated data
+
+def get_batch_size(batch):
+    """
+    Compute the total byte size of a batch, where the batch is a tuple of tensors.
+    """
+    if isinstance(batch, torch.Tensor):
+        return batch.numel() * batch.element_size()
+    
+    total_size = sum(tensor.numel() * tensor.element_size() for tensor in batch)
+    return total_size
+
+class SimulatedDataset(Dataset):
+    def __init__(self, sampler, num_samples):
+        self.num_samples = num_samples
+        self.sampler = sampler
+
+    def __len__(self):
+        return self.num_samples
+
+    def __getitem__(self, idx):
+        # Generate sample on-the-fly
+        return self.sampler.generate()
+
 
 def get_sampler(sampler_config):
     task_samplers = {
@@ -41,6 +63,12 @@ def get_train_result(**kwargs):
 
 def train_generic(model, config, sampler_config, task_handler=None):
     sampler = get_sampler(sampler_config)
+    # Create a DataLoader for efficient batch processing
+    dataset = SimulatedDataset(sampler, num_samples=config.num_epochs)
+    data_loader = DataLoader(dataset, batch_size=1, num_workers=0, shuffle=False)
+    
+    print(f"Dataset Size: {get_batch_size(dataset[0]) * len(dataset) / (1024 ** 2):.2f} MB")
+    
     train_losses, eval_losses, eval_steps = [], [], []
     attn_maps, ngramLosses, bigram_losses, icl_losses, probes = {}, defaultdict(list), [], [], defaultdict(list)
     criterion = nn.CrossEntropyLoss()
@@ -54,15 +82,20 @@ def train_generic(model, config, sampler_config, task_handler=None):
     if config.ngram:
         ngramLearnerDict = {i:ngramLearner(config, sampler_config, i, is_icl) for i in range(config.max_gram)}
     
-    for epoch in trange(config.num_epochs):
+    step = 0
+    
+    for sample in tqdm(data_loader):
+        step += 1
         model.train()
-        batch, out_mask = sampler.generate() if is_masked else (sampler.generate(), None)
+        batch, out_mask = sample if is_masked else (sample, None)
+        batch = batch.squeeze(0)
+        out_mask = out_mask.squeeze(0) if out_mask is not None else None
         optimizer.zero_grad()
         targets = batch[:, 1:].reshape(-1).to(config.device)
 
-        if config.get_attn > 0 and epoch % config.get_attn == 0:
+        if config.get_attn > 0 and step % config.get_attn == 0:
             outputs, attn = model(batch.to(config.device))
-            attn_maps[epoch] = copy.deepcopy(attn)
+            attn_maps[step] = copy.deepcopy(attn)
         else:
             outputs, _ = model(batch.to(config.device))
         
@@ -77,7 +110,7 @@ def train_generic(model, config, sampler_config, task_handler=None):
         
         with torch.no_grad():
             if task_handler:
-                task_handler(epoch, model, batch, outputs, out_mask, criterion, bigram_losses, icl_losses, probes, sampler_config)
+                task_handler(step, model, batch, outputs, out_mask, criterion, bigram_losses, icl_losses, probes, sampler_config)
         
         train_losses.append(loss.item())
         loss.backward()
@@ -85,14 +118,14 @@ def train_generic(model, config, sampler_config, task_handler=None):
         if scheduler:
             scheduler.step()
     
-        if epoch % config.eval_iter == 0:
+        if step % config.eval_iter == 0:
             with torch.no_grad():
                 model.eval()
                 outputs, _ = model(test_data.to(config.device))
                 outputs = outputs[:, :-1, :].reshape(-1, config.vocab_size)
                 eval_loss = criterion(outputs, test_target)
                 eval_losses.append(eval_loss.item())
-                eval_steps.append(epoch)
+                eval_steps.append(step)
 
     return get_train_result(train_losses=train_losses, eval_losses=eval_losses, eval_steps=eval_steps,
                             attn_maps=attn_maps, ngramLosses=ngramLosses, bigram_losses=bigram_losses,
@@ -111,6 +144,11 @@ def bietti_bb_handler(epoch, model, batch, outputs, out_mask, criterion, bigram_
 
 def train_causal(model, config, sampler_config):
     sampler = get_sampler(sampler_config)
+    dataset = SimulatedDataset(sampler, num_samples=config.num_epochs)
+    data_loader = DataLoader(dataset, batch_size=1, num_workers=0, shuffle=False)
+    
+    print(f"Dataset Size: {get_batch_size(dataset[0]) * len(dataset) / (1024 ** 2):.2f} MB")
+    
     train_losses, eval_losses, eval_steps = [], [], []
     bayes_losses = []
     attn_maps = {}
@@ -128,10 +166,16 @@ def train_causal(model, config, sampler_config):
         return -torch.sum(prob * torch.log(bayes_prob), dim=-1).mean()
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
+    step = 0
     
-    for epoch in trange(config.num_epochs):
+    for sample in tqdm(data_loader):
+        step += 1
         model.train()
-        x, prob = sampler.generate()
+        
+        x, prob = sample
+        x = x.squeeze(0)
+        prob = prob.squeeze(0)
+        
         with torch.no_grad():
             bayes_prob = sampler.bayes(x)
             bayes_loss = get_bayes_loss(bayes_prob, prob)
@@ -139,9 +183,9 @@ def train_causal(model, config, sampler_config):
 
         optimizer.zero_grad()
         
-        if config.get_attn > 0 and epoch % config.get_attn == 0:
+        if config.get_attn > 0 and step % config.get_attn == 0:
             outputs, attn = model(x.to(config.device))
-            attn_maps[epoch] = copy.deepcopy(attn)
+            attn_maps[step] = copy.deepcopy(attn)
         else:
             outputs, _ = model(x.to(config.device))
 
@@ -153,14 +197,14 @@ def train_causal(model, config, sampler_config):
         
         if config.scheduler is not None: scheduler.step()
     
-        if epoch % config.eval_iter == 0:
+        if step % config.eval_iter == 0:
             with torch.no_grad():
                 model.eval()
                 outputs, _ = model(test_data.to(config.device))
                 outputs = outputs[:,-1,:].reshape(-1, config.vocab_size)
                 eval_loss = criterion(outputs, test_prob)
                 eval_losses.append(eval_loss.item())
-                eval_steps.append(epoch)
+                eval_steps.append(step)
     
     return get_train_result(train_losses=train_losses, 
                             eval_losses=eval_losses, 
