@@ -9,7 +9,8 @@ import stat
 from datetime import datetime
 from causal_graph import dag_to_adj
 
-def get_loss_plots(config, train_results, task_name):
+def get_loss_plots(config, train_results):
+    task_name = config.task_name
     train_losses, eval_losses, eval_steps = train_results["train_losses"], train_results["eval_losses"], train_results["eval_steps"]
     ngramLosses = train_results["ngramLosses"] if "ngramLosses" in train_results else []
     bayes_losses = train_results["bayes_losses"] if "bayes_losses" in train_results else []
@@ -81,7 +82,8 @@ def remove_readonly(func, path, exc_info):
     func(path)  # Retry removal
 
 
-def get_attn_gif(layer, head, train_results, config, task_name, dag=None, folder="attns", out_folder="attns_plot"):
+def get_attn_gif(layer, head, train_results, config, dag=None, folder="attns", out_folder="attns_plot"):
+    task_name = config.task_name
     attn_maps = train_results["attn_maps"]
     image_paths = []
     if os.path.exists(folder):
@@ -157,7 +159,8 @@ def get_pos_sim(config, model):
     plt.imshow(np.abs(similar))
     plt.show()
 
-def plot_bigram_icl_risk(config, train_results, task_name):
+def plot_bigram_icl_risk(config, train_results):
+    task_name = config.task_name
     plt.figure(figsize=(8, 6))
     plt.plot(range(1, config.num_epochs + 1), train_results["bigram_losses"], 
             linestyle='-', label='Bigram Risk')

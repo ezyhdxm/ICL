@@ -11,7 +11,8 @@ import copy
 
 ### TODO: Maybe use a data_loader so that while the model is training, the next batch is being generated 
 
-def get_sampler(sampler_config, task_name):
+def get_sampler(sampler_config):
+    task_name = sampler_config.task_name
     if task_name == "markov":
         sampler = MarkovSampler(sampler_config)
     elif task_name == "bietti":
@@ -39,7 +40,8 @@ def get_train_result(**kwargs):
     return kwargs
 
 
-def train_causal(model, config, sampler_config, task_name):
+def train_causal(model, config, sampler_config):
+    task_name = sampler_config.task_name
     sampler = get_sampler(sampler_config, task_name)
     train_losses, eval_losses, eval_steps = [], [], []
     bayes_losses = []
@@ -99,7 +101,8 @@ def train_causal(model, config, sampler_config, task_name):
 
 
 
-def train_markov(model, config, sampler_config, task_name):
+def train_markov(model, config, sampler_config):
+    task_name = sampler_config.task_name
     if task_name == "markov":
         sampler = MarkovSampler(sampler_config)
         is_icl = False
@@ -322,12 +325,13 @@ def train_bb(model, config, sampler_config):
                             icl_losses=icl_losses,
                             ngramLosses=ngramLosses)
 
-def train_model(model, config, sampler_config, task_name):
+def train_model(model, config, sampler_config):
+    task_name = sampler_config.task_name
     if task_name in ["markov", "icl-mc"]:
-        return train_markov(model, config, sampler_config, task_name)
+        return train_markov(model, config, sampler_config)
     elif task_name == "bietti":
         return train_bietti(model, config, sampler_config)
     elif task_name == "bb":
         return train_bb(model, config, sampler_config)
     else:
-        return train_causal(model, config, sampler_config, task_name)
+        return train_causal(model, config, sampler_config)
