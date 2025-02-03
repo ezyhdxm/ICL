@@ -8,25 +8,24 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 from util import *
 import copy
 
+from torch.utils.data import Dataset, DataLoader
 
-### TODO: Maybe use a data_loader so that while the model is training, the next batch is being generated 
+### TODO: Use a data_loader to preload part of the simulated data
 
 def get_sampler(sampler_config):
-    task_name = sampler_config.task_name
-    if task_name == "markov":
-        sampler = MarkovSampler(sampler_config)
-    elif task_name == "bietti":
-        sampler = BiettiTask(sampler_config)
-    elif task_name == "bb":
-        sampler = BBTask(sampler_config)
-    elif task_name == "dag":
-        sampler = InContextDAGTorch(sampler_config)
-    elif task_name == "tree":
-        sampler = InContextTreeTorch(sampler_config)
-    else:
-        raise NotImplementedError("Task not implemented yet")
-    return sampler
+    task_samplers = {
+        "markov": MarkovSampler,
+        "bietti": BiettiTask,
+        "bb": BBTask,
+        "dag": InContextDAGTorch,
+        "tree": InContextTreeTorch,
+        "icl-mc": ICLMarkovSampler
+    }
+    if sampler_config.task_name in task_samplers:
+        return task_samplers[sampler_config.task_name](sampler_config)
+    raise NotImplementedError(f"Task '{sampler_config.task_name}' not implemented yet.")
 
+# Compute bigram ICL loss
 def get_bigram_icl_loss(outputs, targets, out_mask, criterion):
     icl_mask_flat = (out_mask==1)[:,:-1].reshape(-1)
     bigram_loss = criterion(outputs[~icl_mask_flat], targets[~icl_mask_flat])
@@ -40,9 +39,78 @@ def get_train_result(**kwargs):
     return kwargs
 
 
+def train_generic(model, config, sampler_config, task_handler=None):
+    sampler = get_sampler(sampler_config)
+    train_losses, eval_losses, eval_steps = [], [], []
+    attn_maps, ngramLosses, bigram_losses, icl_losses, probes = {}, defaultdict(list), [], [], defaultdict(list)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
+    scheduler = CosineAnnealingLR(optimizer, T_max=config.T_max) if config.scheduler is not None else None
+    is_icl = "icl" in sampler_config.task_name
+    is_masked = sampler_config.task_name in ["bietti", "bb"]
+    test_data, test_mask = sampler.generate(mode="test") if is_masked else (sampler.generate(mode="test"), None)
+    test_target = test_data[:, 1:].reshape(-1).to(config.device)
+    
+    if config.ngram:
+        ngramLearnerDict = {i:ngramLearner(config, sampler_config, i, is_icl) for i in range(config.max_gram)}
+    
+    for epoch in trange(config.num_epochs):
+        model.train()
+        batch, out_mask = sampler.generate() if is_masked else (sampler.generate(), None)
+        optimizer.zero_grad()
+        targets = batch[:, 1:].reshape(-1).to(config.device)
+
+        if config.get_attn > 0 and epoch % config.get_attn == 0:
+            outputs, attn = model(batch.to(config.device))
+            attn_maps[epoch] = copy.deepcopy(attn)
+        else:
+            outputs, _ = model(batch.to(config.device))
+        
+        outputs = outputs[:, :-1, :].reshape(-1, config.vocab_size)
+        loss = criterion(outputs, targets)
+
+        if config.ngram:
+            for i, learner in ngramLearnerDict.items():
+                learner.update(batch)
+                ngram_loss = learner.loss(batch)
+                ngramLosses[i].append(ngram_loss.item())
+        
+        with torch.no_grad():
+            if task_handler:
+                task_handler(epoch, model, batch, outputs, out_mask, criterion, bigram_losses, icl_losses, probes, sampler_config)
+        
+        train_losses.append(loss.item())
+        loss.backward()
+        optimizer.step()
+        if scheduler:
+            scheduler.step()
+    
+        if epoch % config.eval_iter == 0:
+            with torch.no_grad():
+                model.eval()
+                outputs, _ = model(test_data.to(config.device))
+                outputs = outputs[:, :-1, :].reshape(-1, config.vocab_size)
+                eval_loss = criterion(outputs, test_target)
+                eval_losses.append(eval_loss.item())
+                eval_steps.append(epoch)
+
+    return get_train_result(train_losses=train_losses, eval_losses=eval_losses, eval_steps=eval_steps,
+                            attn_maps=attn_maps, ngramLosses=ngramLosses, bigram_losses=bigram_losses,
+                            icl_losses=icl_losses, probes=probes)
+
+def bietti_bb_handler(epoch, model, batch, outputs, out_mask, criterion, bigram_losses, icl_losses, probes, sampler_config):
+    bigram_loss, icl_loss = get_bigram_icl_loss(outputs, batch[:, 1:].reshape(-1), out_mask, criterion)
+    bigram_losses.append(bigram_loss)
+    icl_losses.append(icl_loss)
+
+    if sampler_config.task_name == "bietti":
+        probe_keys = ["wk0", "wk1", "wo1"]
+        for pkey in probe_keys:
+            probes[pkey].append(memory_recall_probe(sampler_config.vocab_size, model, pkey, sampler_config.seq_len, sampler_config.device))
+        probes['ff'].append(feedforward_probe(sampler_config.vocab_size, model, sampler_config.trans_mat, sampler_config.device))
+
 def train_causal(model, config, sampler_config):
-    task_name = sampler_config.task_name
-    sampler = get_sampler(sampler_config, task_name)
+    sampler = get_sampler(sampler_config)
     train_losses, eval_losses, eval_steps = [], [], []
     bayes_losses = []
     attn_maps = {}
@@ -99,239 +167,13 @@ def train_causal(model, config, sampler_config):
                             eval_steps=eval_steps, 
                             attn_maps=attn_maps, sampler=sampler, bayes_losses=bayes_losses)
 
-
-
-def train_markov(model, config, sampler_config):
-    task_name = sampler_config.task_name
-    if task_name == "markov":
-        sampler = MarkovSampler(sampler_config)
-        is_icl = False
-    elif task_name == "icl-mc":
-        sampler = ICLMarkovSampler(sampler_config)
-        is_icl = True
-    criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
-    if config.scheduler is not None:
-        scheduler = CosineAnnealingLR(optimizer, T_max=config.T_max)  
-
-    train_losses, eval_losses, eval_steps = [], [], []
-    attn_maps = {}
-    ngramLearnerDict, ngramLosses = {}, {}
-    test_data = sampler.generate(mode="test")
-    test_y = test_data[:,1:].reshape(-1)
-
-    if config.ngram:
-        ngramLearnerDict = {i:ngramLearner(config, sampler_config, i, is_icl) for i in range(config.max_gram)}
-        ngramLosses = defaultdict(list)
-    
-    for epoch in trange(config.num_epochs):
-        model.train()
-        batch = sampler.generate() # bottleneck
-        optimizer.zero_grad()
-        targets = batch[:,1:].reshape(-1)
-
-        if config.get_attn > 0 and epoch % config.get_attn == 0:
-            outputs, attn = model(batch)
-            attn_maps[epoch] = copy.deepcopy(attn)
-        else:
-            outputs, _ = model(batch)
-
-        outputs = outputs[:,:-1,:].reshape(-1, config.vocab_size)
-
-        for i, learner in ngramLearnerDict.items():
-            if not is_icl:
-                ngram_loss = learner.loss(batch)
-                ngramLosses[i].append(ngram_loss.item())
-                learner.update(batch)
-            else:
-                learner.update(batch)
-                ngram_loss = learner.loss(batch)
-                ngramLosses[i].append(ngram_loss.item())
-                
-        
-        loss = criterion(outputs, targets)
-        train_losses.append(loss.item())
-            
-        loss.backward()
-        optimizer.step()
-        
-        if config.scheduler is not None: scheduler.step()
-    
-        if epoch % config.eval_iter == 0:
-            with torch.no_grad():
-                model.eval()
-                outputs, _ = model(test_data)
-                outputs = outputs[:,:-1,:].reshape(-1, config.vocab_size)
-                eval_loss = criterion(outputs, test_y)
-                eval_losses.append(eval_loss.item())
-                eval_steps.append(epoch)
-    return get_train_result(train_losses=train_losses, 
-                            eval_losses=eval_losses, 
-                            eval_steps=eval_steps, 
-                            attn_maps=attn_maps, 
-                            ngramLosses=ngramLosses)
-
-
-def train_bietti(model, config, sampler_config):
-    sampler = get_sampler(sampler_config, "bietti")
-    probes = defaultdict(list)
-    probe_keys = ["wk0", "wk1", "wo1"]
-    train_losses, eval_losses, eval_steps = [], [], []
-    bigram_losses, icl_losses = [], []
-    attn_maps = {}
-    ngramLearnerDict, ngramLosses = {}, {}
-    criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
-    
-    if config.scheduler is not None:
-        scheduler = CosineAnnealingLR(optimizer, T_max=config.T_max)  
-    
-    test_data, test_mask = sampler.generate(mode="test")
-
-    test_y = test_data[:,1:].reshape(-1).to(config.device)
-    
-    if config.ngram:
-        ngramLearnerDict = {i:ngramLearner(config, sampler_config, i, False) for i in range(config.max_gram)}
-        ngramLosses = defaultdict(list)
-    
-    for epoch in trange(config.num_epochs):
-        model.train()
-        batch, out_mask = sampler.generate()
-        optimizer.zero_grad()
-        
-        targets = batch[:,1:].reshape(-1).to(config.device)
-        
-        if config.get_attn > 0 and epoch % config.get_attn == 0:
-            outputs, attn = model(batch.to(config.device))
-            attn_maps[epoch] = copy.deepcopy(attn)
-        else:
-            outputs, _ = model(batch.to(config.device))
-
-        outputs = outputs[:,:-1,:].reshape(-1, config.vocab_size)
-
-        for i, learner in ngramLearnerDict.items():
-            ngram_loss = learner.loss(batch)
-            ngramLosses[i].append(ngram_loss.item())
-            learner.update(batch)
-        
-        loss = criterion(outputs, targets)
-
-        with torch.no_grad():
-            bigram_loss, icl_loss = get_bigram_icl_loss(outputs, targets, out_mask, criterion)
-            bigram_losses.append(bigram_loss)
-            icl_losses.append(icl_loss)
-                
-        train_losses.append(loss.item())
-        loss.backward()
-        optimizer.step()
-        
-        if config.scheduler is not None: scheduler.step()
-        
-        for pkey in probe_keys:
-            probes[pkey].append(memory_recall_probe(config.vocab_size, 
-                                                    model, 
-                                                    pkey, 
-                                                    config.seq_len, config.device))
-        probes['ff'].append(feedforward_probe(config.vocab_size, 
-                                              model, 
-                                              sampler_config.trans_mat, config.device))
-    
-        if epoch % config.eval_iter == 0:
-            with torch.no_grad():
-                model.eval()
-                outputs, _ = model(test_data.to(config.device))
-                outputs = outputs[:,:-1,:].reshape(-1, config.vocab_size)
-                eval_loss = criterion(outputs, test_y)
-                eval_losses.append(eval_loss.item())
-                eval_steps.append(epoch)
-    
-    return get_train_result(train_losses=train_losses, 
-                            eval_losses=eval_losses, 
-                            eval_steps=eval_steps, 
-                            attn_maps=attn_maps, 
-                            ngramLosses=ngramLosses,
-                            probes=probes,
-                            bigram_losses=bigram_losses,
-                            icl_losses=icl_losses,
-                            )
-
-
-def train_bb(model, config, sampler_config):
-    sampler = get_sampler(sampler_config, "bb")
-    train_losses, eval_losses, eval_steps = [], [], []
-    bigram_losses, icl_losses = [], []
-    attn_maps = {}
-    ngramLearnerDict, ngramLosses = {}, {}
-    criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
-    
-    if config.scheduler is not None:
-        scheduler = CosineAnnealingLR(optimizer, T_max=config.T_max)  
-    
-    test_data, test_mask = sampler.generate(mode="test")
-
-    test_y = test_data[:,1:].reshape(-1).to(config.device)
-    
-    if config.ngram:
-        ngramLearnerDict = {i:ngramLearner(config, sampler_config, i) for i in range(config.max_gram)}
-        ngramLosses = defaultdict(list)
-    
-    for epoch in trange(config.num_epochs):
-        model.train()
-        batch, out_mask = sampler.generate()
-        optimizer.zero_grad()
-        
-        targets = batch[:,1:].reshape(-1).to(config.device)
-        
-        if config.get_attn > 0 and epoch % config.get_attn == 0:
-            outputs, attn = model(batch.to(config.device))
-            attn_maps[epoch] = copy.deepcopy(attn)
-        else:
-            outputs, _ = model(batch.to(config.device))
-
-        outputs = outputs[:,:-1,:].reshape(-1, config.vocab_size)
-
-        for i, learner in ngramLearnerDict.items():
-            ngram_loss = learner.loss(batch)
-            ngramLosses[i].append(ngram_loss.item())
-            learner.update(batch)
-        
-        loss = criterion(outputs, targets)
-
-        with torch.no_grad():
-            bigram_loss, icl_loss = get_bigram_icl_loss(outputs, targets, out_mask, criterion)
-            bigram_losses.append(bigram_loss)
-            icl_losses.append(icl_loss)
-                
-        train_losses.append(loss.item())
-        loss.backward()
-        optimizer.step()
-        if config.scheduler is not None: scheduler.step()
-    
-        if epoch % config.eval_iter == 0:
-            with torch.no_grad():
-                model.eval()
-                outputs, _ = model(test_data.to(config.device))
-                outputs = outputs[:,:-1,:].reshape(-1, config.vocab_size)
-                eval_loss = criterion(outputs, test_y)
-                eval_losses.append(eval_loss.item())
-                eval_steps.append(epoch)
-    
-    return get_train_result(train_losses=train_losses, 
-                            eval_losses=eval_losses, 
-                            eval_steps=eval_steps, 
-                            attn_maps=attn_maps, 
-                            bigram_losses=bigram_losses,
-                            icl_losses=icl_losses,
-                            ngramLosses=ngramLosses)
-
+# Train model based on task
 def train_model(model, config, sampler_config):
-    task_name = sampler_config.task_name
-    if task_name in ["markov", "icl-mc"]:
-        return train_markov(model, config, sampler_config)
-    elif task_name == "bietti":
-        return train_bietti(model, config, sampler_config)
-    elif task_name == "bb":
-        return train_bb(model, config, sampler_config)
-    else:
+    if sampler_config.task_name in ["dag", "tree"]:
         return train_causal(model, config, sampler_config)
+    
+    task_handlers = {
+        "bietti": bietti_bb_handler,
+        "bb": bietti_bb_handler
+    }
+    return train_generic(model, config, sampler_config, task_handlers.get(sampler_config.task_name, None))

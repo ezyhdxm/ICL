@@ -87,7 +87,7 @@ def get_attn_gif(layer, head, train_results, config, dag=None, folder="attns", o
     attn_maps = train_results["attn_maps"]
     image_paths = []
     if os.path.exists(folder):
-        shutil.rmtree(folder, onexc=remove_readonly)  # Handle read-only files
+        shutil.rmtree(folder, onerror=remove_readonly)  # Handle read-only files
         print(f"Deleted: {folder}")
     
     os.makedirs(folder)
@@ -148,7 +148,7 @@ def get_attn_gif(layer, head, train_results, config, dag=None, folder="attns", o
     )
     
     print(f"GIF saved at {output_gif_path}")
-    shutil.rmtree(folder, onexc=remove_readonly)
+    shutil.rmtree(folder, onerror=remove_readonly)
     print(f"Folder '{folder}' and its contents removed.")
 
 def get_pos_sim(config, model):
