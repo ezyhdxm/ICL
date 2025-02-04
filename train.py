@@ -6,59 +6,11 @@ from collections import defaultdict
 from causal_graph import *
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from util import *
-import copy
 
-from torch.utils.data import Dataset, DataLoader
-
-
-def get_batch_size(batch):
-    """
-    Compute the total byte size of a batch, where the batch is a tuple of tensors.
-    """
-    if isinstance(batch, torch.Tensor):
-        return batch.numel() * batch.element_size()
-    
-    total_size = sum(tensor.numel() * tensor.element_size() for tensor in batch)
-    return total_size
-
-class SimulatedDataset(Dataset):
-    def __init__(self, sampler, num_samples):
-        self.num_samples = num_samples
-        self.sampler = sampler
-
-    def __len__(self):
-        return self.num_samples
-
-    def __getitem__(self, idx):
-        # Generate sample on-the-fly
-        return self.sampler.generate()
+from torch.utils.data import DataLoader
+from train_utils import *
 
 
-def get_sampler(sampler_config):
-    task_samplers = {
-        "markov": MarkovSampler,
-        "bietti": BiettiTask,
-        "bb": BBTask,
-        "dag": InContextDAGTorch,
-        "tree": InContextTreeTorch,
-        "icl-mc": ICLMarkovSampler
-    }
-    if sampler_config.task_name in task_samplers:
-        return task_samplers[sampler_config.task_name](sampler_config)
-    raise NotImplementedError(f"Task '{sampler_config.task_name}' not implemented yet.")
-
-# Compute bigram ICL loss
-def get_bigram_icl_loss(outputs, targets, out_mask, criterion):
-    icl_mask_flat = (out_mask==1)[:,:-1].reshape(-1)
-    bigram_loss = criterion(outputs[~icl_mask_flat], targets[~icl_mask_flat])
-    preds = torch.argmax(outputs, dim=-1)
-    icl_error = (preds[icl_mask_flat] != targets[icl_mask_flat]).sum()
-    total = icl_mask_flat.sum()
-    icl_loss = icl_error.float() / total.float()
-    return bigram_loss.item(), icl_loss.item()
-
-def get_train_result(**kwargs):
-    return kwargs
 
 
 def train_generic(model, config, sampler_config, task_handler=None):
@@ -70,47 +22,58 @@ def train_generic(model, config, sampler_config, task_handler=None):
     print(f"Dataset Size: {get_batch_size(dataset[0]) * len(dataset) / (1024 ** 2):.2f} MB")
     
     train_losses, eval_losses, eval_steps = [], [], []
-    attn_maps, ngramLosses, bigram_losses, icl_losses, probes = {}, defaultdict(list), [], [], defaultdict(list)
-    criterion = nn.CrossEntropyLoss()
+    attn_maps, ngramLosses, bigram_losses, icl_losses, probes = {}, defaultdict(int), [], [], defaultdict(list)
+    bayes_losses = []
+    is_causal = sampler_config.task_name in ["dag", "tree"]
+    criterion = nn.CrossEntropyLoss() if not is_causal else causal_criterion
     optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
-    scheduler = CosineAnnealingLR(optimizer, T_max=config.T_max) if config.scheduler is not None else None
+    scheduler = CosineAnnealingLR(optimizer, T_max=config.T_max) if config.scheduler is True else None
+    
     is_icl = "icl" in sampler_config.task_name
-    is_masked = sampler_config.task_name in ["bietti", "bb"]
-    test_data, test_mask = sampler.generate(mode="test") if is_masked else (sampler.generate(mode="test"), None)
+    is_info = sampler_config.task_name in ["bietti", "bb", "tree", "dag"]
+    
+    test_data, test_info = sampler.generate(mode="test") if is_info else (sampler.generate(mode="test"), None)
     test_target = test_data[:, 1:].reshape(-1).to(config.device)
     
     if config.ngram:
         ngramLearnerDict = {i:ngramLearner(config, sampler_config, i, is_icl) for i in range(config.max_gram)}
+
+        for i, learner in ngramLearnerDict.items():
+            learner.update(test_data)
+            ngram_loss = learner.loss(test_data)
+            ngramLosses[i] = ngram_loss.item()
     
     step = 0
     
     for sample in tqdm(data_loader):
         step += 1
         model.train()
-        batch, out_mask = sample if is_masked else (sample, None)
+        batch, batch_info = sample if is_info else (sample, None)
         batch = batch.squeeze(0)
-        out_mask = out_mask.squeeze(0) if out_mask is not None else None
+        batch_info = batch_info.squeeze(0) if batch_info is not None else None
         optimizer.zero_grad()
-        targets = batch[:, 1:].reshape(-1).to(config.device)
+        targets = batch[:, 1:].reshape(-1)
 
         if config.get_attn > 0 and step % config.get_attn == 0:
-            outputs, attn = model(batch.to(config.device))
-            attn_maps[step] = copy.deepcopy(attn)
+            outputs, attn = model(batch, get_attn=True)
+            attn_maps[step] = {l: v.clone() for l, v in attn.items()}
         else:
             outputs, _ = model(batch.to(config.device))
         
-        outputs = outputs[:, :-1, :].reshape(-1, config.vocab_size)
-        loss = criterion(outputs, targets)
-
-        if config.ngram:
-            for i, learner in ngramLearnerDict.items():
-                learner.update(batch)
-                ngram_loss = learner.loss(batch)
-                ngramLosses[i].append(ngram_loss.item())
+        if is_causal:
+            with torch.no_grad():
+                bayes_prob = sampler.bayes(batch)
+                bayes_loss = get_bayes_loss(bayes_prob, batch_info)
+                bayes_losses.append(bayes_loss.item())
+            outputs = outputs[:,-1,:].reshape(-1, config.vocab_size)
+            loss = criterion(outputs, batch_info)
+        else:
+            outputs = outputs[:, :-1, :].reshape(-1, config.vocab_size)
+            loss = criterion(outputs, targets)
         
         with torch.no_grad():
             if task_handler:
-                task_handler(step, model, batch, outputs, out_mask, criterion, bigram_losses, icl_losses, probes, sampler_config)
+                task_handler(model, batch, outputs, batch_info, criterion, bigram_losses, icl_losses, probes, sampler_config)
         
         train_losses.append(loss.item())
         loss.backward()
@@ -121,101 +84,19 @@ def train_generic(model, config, sampler_config, task_handler=None):
         if step % config.eval_iter == 0:
             with torch.no_grad():
                 model.eval()
-                outputs, _ = model(test_data.to(config.device))
-                outputs = outputs[:, :-1, :].reshape(-1, config.vocab_size)
-                eval_loss = criterion(outputs, test_target)
+                outputs, _ = model(test_data)
+                outputs = outputs[:, :-1, :].reshape(-1, config.vocab_size) if not is_causal else outputs[:,-1,:].reshape(-1, config.vocab_size)
+                eval_loss = criterion(outputs, test_target) if not is_causal else criterion(outputs, test_info)
                 eval_losses.append(eval_loss.item())
                 eval_steps.append(step)
 
     return get_train_result(train_losses=train_losses, eval_losses=eval_losses, eval_steps=eval_steps,
                             attn_maps=attn_maps, ngramLosses=ngramLosses, bigram_losses=bigram_losses,
-                            icl_losses=icl_losses, probes=probes)
+                            icl_losses=icl_losses, probes=probes, sampler=sampler, bayes_losses=bayes_losses)
 
-def bietti_bb_handler(epoch, model, batch, outputs, out_mask, criterion, bigram_losses, icl_losses, probes, sampler_config):
-    bigram_loss, icl_loss = get_bigram_icl_loss(outputs, batch[:, 1:].reshape(-1), out_mask, criterion)
-    bigram_losses.append(bigram_loss)
-    icl_losses.append(icl_loss)
-
-    if sampler_config.task_name == "bietti":
-        probe_keys = ["wk0", "wk1", "wo1"]
-        for pkey in probe_keys:
-            probes[pkey].append(memory_recall_probe(sampler_config.vocab_size, model, pkey, sampler_config.seq_len, sampler_config.device))
-        probes['ff'].append(feedforward_probe(sampler_config.vocab_size, model, sampler_config.trans_mat, sampler_config.device))
-
-def train_causal(model, config, sampler_config):
-    sampler = get_sampler(sampler_config)
-    dataset = SimulatedDataset(sampler, num_samples=config.num_epochs)
-    data_loader = DataLoader(dataset, batch_size=1, num_workers=0, shuffle=False)
-    
-    print(f"Dataset Size: {get_batch_size(dataset[0]) * len(dataset) / (1024 ** 2):.2f} MB")
-    
-    train_losses, eval_losses, eval_steps = [], [], []
-    bayes_losses = []
-    attn_maps = {}
-    test_data, test_prob = sampler.generate(mode="test")
-
-    if config.scheduler is not None:
-        scheduler = CosineAnnealingLR(optimizer, T_max=config.T_max)  
-
-
-    def criterion(logits, probs):
-        log_probs = torch.log_softmax(logits, dim=-1)
-        return -torch.sum(probs * log_probs, dim=-1).mean()
-    
-    def get_bayes_loss(bayes_prob, prob):
-        return -torch.sum(prob * torch.log(bayes_prob), dim=-1).mean()
-
-    optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
-    step = 0
-    
-    for sample in tqdm(data_loader):
-        step += 1
-        model.train()
-        
-        x, prob = sample
-        x = x.squeeze(0)
-        prob = prob.squeeze(0)
-        
-        with torch.no_grad():
-            bayes_prob = sampler.bayes(x)
-            bayes_loss = get_bayes_loss(bayes_prob, prob)
-            bayes_losses.append(bayes_loss.item())
-
-        optimizer.zero_grad()
-        
-        if config.get_attn > 0 and step % config.get_attn == 0:
-            outputs, attn = model(x.to(config.device))
-            attn_maps[step] = copy.deepcopy(attn)
-        else:
-            outputs, _ = model(x.to(config.device))
-
-        outputs = outputs[:,-1,:].reshape(-1, config.vocab_size)
-        loss = criterion(outputs, prob)
-        train_losses.append(loss.item())
-        loss.backward()
-        optimizer.step()
-        
-        if config.scheduler is not None: scheduler.step()
-    
-        if step % config.eval_iter == 0:
-            with torch.no_grad():
-                model.eval()
-                outputs, _ = model(test_data.to(config.device))
-                outputs = outputs[:,-1,:].reshape(-1, config.vocab_size)
-                eval_loss = criterion(outputs, test_prob)
-                eval_losses.append(eval_loss.item())
-                eval_steps.append(step)
-    
-    return get_train_result(train_losses=train_losses, 
-                            eval_losses=eval_losses, 
-                            eval_steps=eval_steps, 
-                            attn_maps=attn_maps, sampler=sampler, bayes_losses=bayes_losses)
 
 # Train model based on task
 def train_model(model, config, sampler_config):
-    if sampler_config.task_name in ["dag", "tree"]:
-        return train_causal(model, config, sampler_config)
-    
     task_handlers = {
         "bietti": bietti_bb_handler,
         "bb": bietti_bb_handler

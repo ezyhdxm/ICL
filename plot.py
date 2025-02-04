@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 import os
 import shutil
 from PIL import Image
@@ -8,6 +9,7 @@ import seaborn as sns
 import stat
 from datetime import datetime
 from causal_graph import dag_to_adj
+from tqdm.notebook import tqdm
 
 def get_loss_plots(config, train_results):
     task_name = config.task_name
@@ -24,10 +26,11 @@ def get_loss_plots(config, train_results):
     if len(bayes_losses) >= 1:
         plt.plot(range(1, config.num_epochs + 1), bayes_losses, 
                 linestyle='-', color='burlywood', label='Bayes Loss')
-
+        
+    cmap = cm.get_cmap('tab10') 
     for i in range(len(ngramLosses)):
-        plt.plot(range(1, config.num_epochs + 1), ngramLosses[i], 
-                linestyle='-', label=f'{i+1}-gram Loss')
+        color = cmap(i)
+        plt.axhline(y=ngramLosses[i], linestyle='-', label=f'{i+1}-gram Loss', color=color)
     
     plt.xlabel('Epochs')
     plt.ylabel('Loss')
@@ -91,17 +94,17 @@ def get_attn_gif(layer, head, train_results, config, dag=None, folder="attns", o
         print(f"Deleted: {folder}")
     
     os.makedirs(folder)
-    for i, attn in attn_maps.items():
+    for i, attn in tqdm(attn_maps.items()):
         if dag is None:
             if head != "all":
                 plt.figure(figsize=(6, 6))
-                sns.heatmap(attn[layer][head], cmap="viridis", annot=False, cbar=True)
+                sns.heatmap(attn[layer][head].cpu(), cmap="viridis", annot=False, cbar=True)
                 plt.title(f"Epoch {i + 1}")
             else:
                 h = config.num_heads[layer]
                 fig, axes = plt.subplots(1, h, figsize=(6*h, 6))
                 for j in range(h):
-                    sns.heatmap(attn[layer][j], ax=axes[j], cmap="viridis", annot=False, cbar=True)
+                    sns.heatmap(attn[layer][j].cpu(), ax=axes[j], cmap="viridis", annot=False, cbar=True)
                     axes[j].set_title(f"Head {j+1} at Epoch {i + 1}")
                 plt.tight_layout()
         else:
@@ -109,7 +112,7 @@ def get_attn_gif(layer, head, train_results, config, dag=None, folder="attns", o
             if head != "both":
                 fig, axes = plt.subplots(1, 2, figsize=(12, 6))  # 1 row, 2 columns
 
-                sns.heatmap(attn[layer][head], ax=axes[0], cmap="viridis", annot=False, linewidths=0.05)
+                sns.heatmap(attn[layer][head].cpu(), ax=axes[0], cmap="viridis", annot=False, linewidths=0.05)
                 axes[0].set_title(f"Attention Map at Epoch {i + 1}")
                 sns.heatmap(adj_mat, ax=axes[1], cmap="viridis", annot=False, linewidths=0.05)
                 axes[1].set_title("Adjacency Matrix of DAG")
@@ -117,9 +120,9 @@ def get_attn_gif(layer, head, train_results, config, dag=None, folder="attns", o
             else:
                 fig, axes = plt.subplots(1, 3, figsize=(18, 6))  # 1 row, 3 columns
 
-                sns.heatmap(attn[layer][0], ax=axes[0], cmap="viridis", annot=False, linewidths=0.05)
+                sns.heatmap(attn[layer][0].cpu(), ax=axes[0], cmap="viridis", annot=False, linewidths=0.05)
                 axes[0].set_title(f"Head 1 Attention Map at Epoch {i + 1}")
-                sns.heatmap(attn[layer][1], ax=axes[1], cmap="viridis", annot=False, linewidths=0.05)
+                sns.heatmap(attn[layer][1].cpu(), ax=axes[1], cmap="viridis", annot=False, linewidths=0.05)
                 axes[1].set_title(f"Head 2 Attention Map at Epoch {i + 1}")
                 sns.heatmap(adj_mat, ax=axes[2], cmap="viridis", annot=False, linewidths=0.05)
                 axes[2].set_title("Adjacency Matrix of DAG")

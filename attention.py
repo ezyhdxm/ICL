@@ -31,7 +31,6 @@ class MultiHeadAttention(nn.Module):
         self.seq_len = config.seq_len
         self.scale = self.head_dim ** 0.5
         self.flash = config.flash
-        self.counter = 0
         self.dropout = config.dropout if config.dropout else 0.
         assert not (self.flash and self.pos_enc == "rpe"), "Flash Attention does not support RPE currently."  
         if self.pos_enc == "rpe":
@@ -43,7 +42,7 @@ class MultiHeadAttention(nn.Module):
             self.alibi_emb = AliBiPositionalEncoding(self.n_head)
         
 
-    def forward(self, x): # x: (B,T,C)
+    def forward(self, x, get_attn): # x: (B,T,C)
         batch_size, seq_len, _ = x.size()
         Q = self.query(x).view(batch_size, seq_len, self.n_head, self.head_dim).transpose(1,2) # (B,H,T,D)
         K = self.key(x).view(batch_size, seq_len, self.n_head, self.head_dim).transpose(1,2) # (B,H,T,D)
@@ -51,11 +50,10 @@ class MultiHeadAttention(nn.Module):
         if self.pos_enc == "rotary":
             Q = self.rotary_emb(Q)
             K = self.rotary_emb(K)
-        if self.flash and (self.get_attn==0 or (self.counter % self.get_attn != 0)):
+        if self.flash and (not get_attn):
             out = F.scaled_dot_product_attention(Q, K, V, attn_mask=None, dropout_p=self.dropout, is_causal=True)
             out = out.transpose(1,2).contiguous().view(batch_size,seq_len,-1) # (B,T,C)
             out = self.out(out)
-            self.counter += 1
             return out, -1
         else:
             attn_score = Q @ K.transpose(-1,-2) / self.scale # (B,H,T,T)
@@ -78,9 +76,7 @@ class MultiHeadAttention(nn.Module):
                 out += out2
             out = out.transpose(1,2).contiguous().view(batch_size,seq_len,-1) # (B,T,C)
             out = self.out(out)
-            if self.get_attn > 0 and (self.counter % self.get_attn == 0):
-                self.counter += 1
-                return out, attn.detach().cpu() 
+            if get_attn:
+                return out, attn.detach()
             else:
-                self.counter += 1
                 return out, -1

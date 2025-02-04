@@ -36,9 +36,9 @@ class TFBlock(nn.Module):
                 self.mlp = nn.Linear(config.emb_dim, config.emb_dim)
             self.ln2 = nn.LayerNorm(config.emb_dim) if config.layer_norm else nn.Identity()
 
-    def forward(self, x):
+    def forward(self, x, get_attn=False):
         attn_map = -1
-        atten_out, attn_map = self.MHA(x)
+        atten_out, attn_map = self.MHA(x, get_attn)
         x = x + self.dropout(atten_out) if self.dropout is not None else x + atten_out
         x = self.ln1(x)
         if self.mlp is not None:
@@ -58,15 +58,15 @@ class Transformer(nn.Module):
             self.positional_encoding = nn.Embedding(config.seq_len, config.emb_dim)
         self.layers = nn.ModuleList([TFBlock(config, layer) for layer in range(config.num_layers)])
         self.output_layer = nn.Linear(config.emb_dim, config.vocab_size)
-        self.atten_maps = {l: torch.zeros((config.num_heads[l], config.seq_len, config.seq_len)) for l in range(config.num_layers)}
+        self.atten_maps = {l: torch.zeros((config.num_heads[l], config.seq_len, config.seq_len), device=config.device) for l in range(config.num_layers)}
 
-    def forward(self, x):
+    def forward(self, x, get_attn=False):
         if self.pos_enc == "abs":
             x = self.embed(x) + self.positional_encoding(torch.arange(x.size(1), device=x.device).view(1, x.size(1)))
         else:
             x = self.embed(x)
         for i, layer in enumerate(self.layers):
-            x, attn_map = layer(x)
+            x, attn_map = layer(x, get_attn)
             if torch.is_tensor(attn_map):
                 self.atten_maps[i] = attn_map.mean(dim=0)
             

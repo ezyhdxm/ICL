@@ -11,7 +11,7 @@ class BaseConfig:
 
     # Training
     batch_size: int = 256
-    test_size: int = 2048
+    test_size: int = 4096
     task_name: str = "icl-mc"
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -47,7 +47,7 @@ class Config(BaseConfig):
     identity_query: bool = False
 
     # Scheduler
-    scheduler: Optional[str] = None
+    scheduler: bool = False
     T_max: int = 20
     
     # N-Gram

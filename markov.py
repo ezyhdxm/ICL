@@ -2,8 +2,6 @@ import torch
 import torch.nn.functional as F
 
 # TODO: maybe switching to JAX in the future?
-# TODO: Add ICL Markov sampler
-# TODO: Add causal graph
 
 # Simple Markov chain sampler
 class MarkovSampler:
@@ -300,7 +298,7 @@ class BBTask:
 
 
 # Empirical n-gram learner
-# TODO: it seems that the learner behaves a bit wierdly, need to check the implementation
+# TODO: ngramLearner is slow, need to optimize, maybe only run for a few iterations and then use the same values for the rest
 class ngramLearner:
     def __init__(self, config, sampler_config, order, is_icl=False):
         self.order = order
@@ -343,7 +341,7 @@ class ngramLearner:
                 self.trans_mat_est += torch.bincount(batch.flatten(), minlength=self.vocab_size)
             else:
                 bin_counts = torch.stack([torch.bincount(batch[i], minlength=self.vocab_size) for i in range(batch_size)])
-                self.trans_mat_est = bin_counts / bin_counts.sum(dim=-1, keepdim=True)
+                self.trans_mat_est = bin_counts / (bin_counts.sum(dim=-1, keepdim=True)+1e-6)
                 
     def predict(self, batch):
         batch_size, seq_len = batch.size()
@@ -373,7 +371,7 @@ class ngramLearner:
     def loss(self, batch):
         probs = self.predict(batch)
         one_hot_labels = F.one_hot(batch, num_classes=self.vocab_size).float()
-        loss = -torch.sum(one_hot_labels * torch.log(probs)) / (batch.size(0) * batch.size(1))
+        loss = -torch.sum(one_hot_labels * torch.log(probs+1e-6)) / (batch.size(0) * batch.size(1))
         return loss
 
 

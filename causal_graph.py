@@ -106,13 +106,13 @@ class InContextTreeTorch:
     def bayes(self, samples): # samples: (B, seq_len)
         num_samples, seq_len = samples.shape
         test_tokens, seq = samples[:,-1], samples[:,:-1] # (B,), (B,seq_len-1)
-        counts = torch.zeros((num_samples, self.vocab_size))
+        counts = torch.zeros((num_samples, self.vocab_size), device=self.device)
         for i in range(1, seq_len-1):
             parent_index = self.dag[i]
             if parent_index == -1:
                 continue
             indices = (seq[:,parent_index] == test_tokens).nonzero(as_tuple=True)[0]
-            values = torch.ones_like(indices, dtype=torch.float) 
+            values = torch.ones_like(indices, dtype=torch.float, device=self.device) 
             counts.index_put_((indices, seq[indices,i]), values, accumulate=True)
         counts += self.alpha
         return counts / counts.sum(dim=-1, keepdim=True)
@@ -163,14 +163,14 @@ class InContextDAGTorch:
         num_samples, seq_len = samples.shape
         last_parents = samples[:,self.dag[-1]]
         k = last_parents.shape[1]
-        counts = torch.zeros((num_samples, self.vocab_size))
+        counts = torch.zeros((num_samples, self.vocab_size), device=self.device)
         for i in range(1, seq_len-1):
             parent_indexes = self.dag[i]
             if len(parent_indexes) == k:
                 indices = (samples[:,parent_indexes] == last_parents).all(dim=-1).nonzero(as_tuple=True)[0]
                 if len(indices) == 0:
                     continue
-                values = torch.ones_like(indices, dtype=torch.float) 
+                values = torch.ones_like(indices, dtype=torch.float, device=self.device) 
                 counts.index_put_((indices, samples[indices,i]), values, accumulate=True)
         counts += self.alpha
         return counts / counts.sum(dim=-1, keepdim=True)

@@ -40,3 +40,12 @@ def feedforward_probe(num_tokens, model, trans_mat, device='cpu'):
     toks = model.layers[1].mlp(toks)
     toks = model.output_layer(toks)
     return F.kl_div(F.log_softmax(toks, dim=1), trans_mat[range_toks], reduction='batchmean').item()
+
+#################
+# Get Attention #
+#################
+
+def attention_probe(model, sample):
+    sample = sample.to(model.device)
+    with torch.no_grad():
+        outputs, attn = model(sample)
