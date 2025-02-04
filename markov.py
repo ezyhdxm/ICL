@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as F
+from typing import Tuple
 
 # TODO: maybe switching to JAX in the future?
 
@@ -20,8 +21,9 @@ class MarkovSampler:
         self.trans_matrix = dirichlet_dist.sample((self.num_states_order,))  # Shape: (num_states_order, num_states)
         self.trans_matrix /= self.trans_matrix.sum(dim=1, keepdim=True)
     
-    def generate(self, mode:str="train")-> torch.Tensor:
+    def generate(self, epochs=1, mode:str="train")-> torch.Tensor:
         num_samples = self.batch_size if mode == "train" else self.test_size
+        num_samples *= epochs
         
         # Initialize the samples tensor
         samples = torch.zeros((num_samples, self.seq_len), dtype=torch.long, device=self.device)
@@ -45,18 +47,20 @@ class MarkovSampler:
             state[:, :-1] = state[:, 1:]  # Shift left
             state[:, -1] = next_states    # Append new state
             
-        return samples
+        return samples.reshape(epochs, -1, self.seq_len), probs.reshape(epochs, -1, self.num_states)
 
-def markov_generate_unjitted(trans_matrix:torch.Tensor, num_samples:int, seq_len:int, num_states:int, order:int, device:str)->torch.Tensor:
+def markov_generate_unjitted(trans_matrix:torch.Tensor, num_samples:int, seq_len:int, num_states:int, order:int, device:str, epochs:int=1)->Tuple[torch.Tensor, torch.Tensor]:
     # num_samples = self.batch_size if mode == "train" else self.test_size
         
     # Initialize the samples tensor
+    num_samples *= epochs
     powers = (num_states ** torch.arange(order - 1, -1, -1, device=device)).long()
     samples = torch.zeros((num_samples, seq_len), dtype=torch.long, device=device)
     
     # Initialize the state (randomly choose starting states for each sequence)
     state = torch.randint(high=num_states, size=(num_samples, order), device=device)
     samples[:, :order] = state
+    probs = torch.zeros((num_samples, num_states), device=device)
         
     for t in range(order, seq_len):
         state_indices = torch.sum(state*powers, dim=1)
@@ -73,20 +77,22 @@ def markov_generate_unjitted(trans_matrix:torch.Tensor, num_samples:int, seq_len
         state[:, :-1] = state[:, 1:]  # Shift left
         state[:, -1] = next_states    # Append new state
         
-    return samples
+    return samples.reshape(epochs, -1, seq_len), probs.reshape(epochs, -1, num_states)
 
 
 @torch.jit.script
-def markov_generate_jitted(trans_matrix:torch.Tensor, num_samples:int, seq_len:int, num_states:int, order:int, device:str)->torch.Tensor:
+def markov_generate_jitted(trans_matrix:torch.Tensor, num_samples:int, seq_len:int, num_states:int, order:int, device:str, epochs:int=1)->Tuple[torch.Tensor, torch.Tensor]:
     # num_samples = self.batch_size if mode == "train" else self.test_size
         
     # Initialize the samples tensor
+    num_samples *= epochs
     powers = (num_states ** torch.arange(order - 1, -1, -1, device=device)).long()
     samples = torch.zeros((num_samples, seq_len), dtype=torch.long, device=device)
     
     # Initialize the state (randomly choose starting states for each sequence)
     state = torch.randint(high=num_states, size=(num_samples, order), device=device)
     samples[:, :order] = state
+    probs = torch.zeros((num_samples, num_states), device=device)
         
     for t in range(order, seq_len):
         state_indices = torch.sum(state*powers, dim=1)
@@ -103,7 +109,7 @@ def markov_generate_jitted(trans_matrix:torch.Tensor, num_samples:int, seq_len:i
         state[:, :-1] = state[:, 1:]  # Shift left
         state[:, -1] = next_states    # Append new state
         
-    return samples
+    return samples.reshape(epochs, -1, seq_len), probs.reshape(epochs, -1, num_states)
 
 
 # ICL Markov chain sampler
@@ -120,8 +126,9 @@ class ICLMarkovSampler:
         self.powers = (self.num_states ** torch.arange(self.order - 1, -1, -1, device=self.device)).long()
         self.dirichlet_dist = torch.distributions.Dirichlet(torch.ones(self.num_states, device=self.device)*self.alpha)
     
-    def generate(self, mode="train"):
+    def generate(self, mode="train", epochs=1):
         num_samples = self.batch_size if mode == "train" else self.test_size
+        num_samples *= epochs
         range_vecs = torch.arange(num_samples, device=self.device)
 
         # Sample all transition probabilities in one go
@@ -149,7 +156,7 @@ class ICLMarkovSampler:
             state[:, :-1] = state[:, 1:]  # Shift left
             state[:, -1] = next_states    # Append new state
         
-        return samples
+        return samples.reshape(epochs, -1, self.seq_len), probs.reshape(epochs, -1, self.num_states)
 
 
 
@@ -170,10 +177,11 @@ class BiettiTask:
         self.show_mask = config.show_mask
         self.device = config.device
     
-    def generate(self, mode="train"):
+    def generate(self, mode="train", epochs=1):
         if self.seed is not None:
             torch.manual_seed(self.seed)
         num_samples = self.batch_size if mode == "train" else self.test_size
+        num_samples *= epochs
         prob_matrix = self.marginal.unsqueeze(0).repeat(num_samples, 1)
         # Sample without replacement
         q_toks = torch.multinomial(prob_matrix, self.k, replacement=False)  # Shape: (num_samples, k)
@@ -223,9 +231,9 @@ class BiettiTask:
             current_tokens = nxt_tokens
         
         if self.show_mask:
-            return samples, output_mask
+            return samples.reshape(epochs, -1, self.seq_len+off_set), output_mask.reshape(epochs, -1, self.seq_len+off_set)
         
-        return samples
+        return samples.reshape(epochs, -1, self.seq_len+off_set)
 
 
 # Bigram Backcopy task: https://arxiv.org/pdf/2410.13835
@@ -251,10 +259,11 @@ class BBTask:
         self.init_prob /= self.init_prob.sum() 
         
     
-    def generate(self, mode="train"):
+    def generate(self, mode="train", epochs=1):
         if self.seed is not None:
             torch.manual_seed(self.seed)
         num_samples = self.batch_size if mode == "train" else self.test_size
+        num_samples *= epochs
 
         # Initialize the samples tensor
         samples = torch.zeros((num_samples, self.seq_len), dtype=torch.long, device=self.device)
@@ -291,14 +300,13 @@ class BBTask:
             prev_tokens, current_tokens = current_tokens.clone(), nxt_tokens.clone()
         
         if self.show_mask:
-            return samples, output_mask
+            return samples.reshape(epochs, -1, self.seq_len), output_mask.reshape(epochs, -1, self.seq_len)
         
-        return samples
+        return samples.reshape(epochs, -1, self.seq_len)
 
 
 
 # Empirical n-gram learner
-# TODO: ngramLearner is slow, need to optimize, maybe only run for a few iterations and then use the same values for the rest
 class ngramLearner:
     def __init__(self, config, sampler_config, order, is_icl=False):
         self.order = order

@@ -22,7 +22,7 @@ def get_bayes_loss(bayes_prob, prob):
     return -torch.sum(prob * torch.log(bayes_prob), dim=-1).mean()
 
 
-def causal_criterion(logits, probs):
+def last_token_loss(logits, probs):
     log_probs = torch.log_softmax(logits, dim=-1)
     return -torch.sum(probs * log_probs, dim=-1).mean()
 

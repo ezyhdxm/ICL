@@ -11,7 +11,8 @@ class BaseConfig:
 
     # Training
     batch_size: int = 256
-    test_size: int = 4096
+    num_epochs: int = 1000
+    test_size: int = 1024
     task_name: str = "icl-mc"
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -38,7 +39,6 @@ class Config(BaseConfig):
 
     # Training
     learning_rate: float = 3e-4
-    num_epochs: int = 1000
     eval_iter: int = 50
     get_attn: int = 50
     weight_decay: float = 1e-2
@@ -51,20 +51,15 @@ class Config(BaseConfig):
     T_max: int = 20
     
     # N-Gram
-    ngram: bool = True
-    max_gram: int = 4
+    ngram: int = 4
 
 
 @dataclass
 class MarkovSamplerConfig(BaseConfig):
     order: int = 2
     alpha: float = 1
-
-
-@dataclass
-class CausalGraphConfig(BaseConfig):
-    alpha: float = 1
     dag: list = None
+
 
 @dataclass
 class BiettiSamplerConfig(BaseConfig):
@@ -77,30 +72,12 @@ class BiettiSamplerConfig(BaseConfig):
     alpha: float = 1
 
     def __post_init__(self):
-        self.marginal = torch.ones((self.vocab_size,), device=self.device) / self.vocab_size
+        num_states = self.vocab_size if self.task_name == "bietti" else self.vocab_size - 1
+        self.marginal = torch.ones((num_states,), device=self.device) / num_states
         if not self.shakespeare:
-            prior = torch.ones(self.vocab_size, device=self.device) * self.alpha
+            prior = torch.ones(num_states, device=self.device) * self.alpha
             dirichlet_dist = torch.distributions.Dirichlet(prior)
-            self.trans_mat = dirichlet_dist.sample((self.vocab_size,))  # Shape: (vocab_size, vocab_size)
-            self.trans_mat /= self.trans_mat.sum(dim=1, keepdim=True)
-        else:
-            raise NotImplementedError("Shakespeare not implemented yet")
-
-@dataclass
-class BBSamplerConfig(BaseConfig):
-    k: int = 2
-    marginal: torch.Tensor = None
-    trans_mat: torch.Tensor = None
-    show_mask: bool = False
-    shakespeare: bool = False
-    alpha: float = 1
-
-    def __post_init__(self):
-        self.marginal = torch.ones((self.vocab_size-1,), device=self.device) / (self.vocab_size-1)
-        if not self.shakespeare:
-            prior = torch.ones(self.vocab_size-1, device=self.device) * self.alpha
-            dirichlet_dist = torch.distributions.Dirichlet(prior)
-            self.trans_mat = dirichlet_dist.sample((self.vocab_size-1,))  # Shape: (vocab_size-1, vocab_size-1)
+            self.trans_mat = dirichlet_dist.sample((num_states,))  # Shape: (vocab_size, vocab_size)
             self.trans_mat /= self.trans_mat.sum(dim=1, keepdim=True)
         else:
             raise NotImplementedError("Shakespeare not implemented yet")

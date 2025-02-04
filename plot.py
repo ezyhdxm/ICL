@@ -10,21 +10,33 @@ import stat
 from datetime import datetime
 from causal_graph import dag_to_adj
 from tqdm.notebook import tqdm
+from scipy.interpolate import make_interp_spline
+
+def moving_average(y, window_size=5):
+    return np.convolve(y, np.ones(window_size)/window_size, mode='valid')
 
 def get_loss_plots(config, train_results):
     task_name = config.task_name
     train_losses, eval_losses, eval_steps = train_results["train_losses"], train_results["eval_losses"], train_results["eval_steps"]
     ngramLosses = train_results["ngramLosses"] if "ngramLosses" in train_results else []
     bayes_losses = train_results["bayes_losses"] if "bayes_losses" in train_results else []
+    last_token_losses = train_results["last_token_losses"] if "last_token_losses" in train_results else []
     
     plt.figure(figsize=(8, 6))
-    plt.plot(range(1, config.num_epochs + 1), train_losses, 
+    range_vec = range(1, config.num_epochs + 1)
+    plt.plot(range_vec, train_losses, 
             linestyle='-', color='lightblue', label='Training Loss')
+    if len(last_token_losses) >= 1:
+        # spline = make_interp_spline(range_vec, last_token_losses, k=3)
+        last_token_losses_smoothed = moving_average(last_token_losses)
+        
+        plt.plot(range_vec[:len(last_token_losses_smoothed)], last_token_losses_smoothed, 
+                linestyle='-', color="#B39EB5", label='Last Token Training Loss', alpha=0.5)
     plt.plot(eval_steps, eval_losses, 
              linestyle='--', color='palevioletred', label='Validation Loss')
 
     if len(bayes_losses) >= 1:
-        plt.plot(range(1, config.num_epochs + 1), bayes_losses, 
+        plt.plot(range_vec, bayes_losses, 
                 linestyle='-', color='burlywood', label='Bayes Loss')
         
     cmap = cm.get_cmap('tab10') 

@@ -2,9 +2,13 @@ from collections import namedtuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.attention.flex_attention import flex_attention, create_block_mask
 from pos_encoder import *
 
 # TODO: Add MLA, MQA, GQA
+
+def causal(b, h, q_idx, kv_idx):
+    return q_idx >= kv_idx
 
 class MultiHeadAttention(nn.Module):
     def __init__(self, config, layer=0):
@@ -24,23 +28,30 @@ class MultiHeadAttention(nn.Module):
         self.out = nn.Linear(self.emb_dim, self.emb_dim, bias=config.bias)
         if config.freeze_out:
             self.out.weight.requires_grad_(False)
-        self.mask = torch.tril(torch.ones(config.seq_len, config.seq_len)).unsqueeze(0).unsqueeze(1)
-        self.mask = self.mask.to(config.device) # TODO: make self.mask a register_buffer
+        self.mask = torch.tril(torch.ones((config.seq_len, config.seq_len), device=config.device)).unsqueeze(0).unsqueeze(1) # TODO: make self.mask a register_buffer
         self.get_attn = config.get_attn
         self.pos_enc = config.pos_enc
         self.seq_len = config.seq_len
         self.scale = self.head_dim ** 0.5
         self.flash = config.flash
         self.dropout = config.dropout if config.dropout else 0.
-        assert not (self.flash and self.pos_enc == "rpe"), "Flash Attention does not support RPE currently."  
+        # assert not (self.flash and self.pos_enc == "rpe"), "Flash Attention does not support RPE currently."  
         if self.pos_enc == "rpe":
-            self.PEK = RelativePositionalEncoding(self.head_dim, config.pos_max_len) # (T,T,D)
-            self.PEV = RelativePositionalEncoding(self.head_dim, config.pos_max_len) # (T,T,D)
+            if not self.flash:
+                self.PEV = RelativePositionalEncoding(self.head_dim, config.pos_max_len) # (T,T,D)
+                self.PEK = RelativePositionalEncoding(self.head_dim, config.pos_max_len) # (T,T,D)
+            elif config.device == "cuda":
+                self.rpe = nn.Parameter(torch.randn(2*config.pos_max_len+1, self.head_dim) / self.head_dim ** 0.5)
+                def relative_positional(score, b, h, q_idx, kv_idx):
+                    return score + self.rpe[q_idx - kv_idx]
+            else:
+                raise ValueError("Flash Attention with RPE is currently only supported on CUDA devices.")
+        
         elif self.pos_enc == "rotary":
-            self.rotary_emb = RotaryPositionalEmbeddings(self.head_dim, self.pos_max_len)
+            self.rotary_emb = RotaryPositionalEmbeddings(self.head_dim, config.pos_max_len)
         elif self.pos_enc == "alibi":
             self.alibi_emb = AliBiPositionalEncoding(self.n_head)
-        
+    
 
     def forward(self, x, get_attn): # x: (B,T,C)
         batch_size, seq_len, _ = x.size()
@@ -50,8 +61,14 @@ class MultiHeadAttention(nn.Module):
         if self.pos_enc == "rotary":
             Q = self.rotary_emb(Q)
             K = self.rotary_emb(K)
+            
         if self.flash and (not get_attn):
-            out = F.scaled_dot_product_attention(Q, K, V, attn_mask=None, dropout_p=self.dropout, is_causal=True)
+            if self.pos_enc == "rpe":
+                # Because the sparsity pattern is independent of batch and heads, we'll set them to None (which broadcasts them) 
+                block_mask = create_block_mask(causal, B=None, H=None, Q_LEN=seq_len, KV_LEN=seq_len)
+                out = flex_attention(Q, K, V, score_mod=relative_positional, block_mask=block_mask)
+            else:
+                out = F.scaled_dot_product_attention(Q, K, V, attn_mask=None, dropout_p=self.dropout, is_causal=True)
             out = out.transpose(1,2).contiguous().view(batch_size,seq_len,-1) # (B,T,C)
             out = self.out(out)
             return out, -1
