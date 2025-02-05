@@ -35,15 +35,14 @@ class MultiHeadAttention(nn.Module):
         self.scale = self.head_dim ** 0.5
         self.flash = config.flash
         self.dropout = config.dropout if config.dropout else 0.
-        # assert not (self.flash and self.pos_enc == "rpe"), "Flash Attention does not support RPE currently."  
+        assert not (self.flash and self.pos_enc == "rpe"), "Flash Attention does not support RPE currently."  
         if self.pos_enc == "rpe":
             if not self.flash:
                 self.PEV = RelativePositionalEncoding(self.head_dim, config.pos_max_len) # (T,T,D)
                 self.PEK = RelativePositionalEncoding(self.head_dim, config.pos_max_len) # (T,T,D)
             elif config.device == "cuda":
-                self.rpe = nn.Parameter(torch.randn(2*config.pos_max_len+1, self.head_dim) / self.head_dim ** 0.5)
-                def relative_positional(score, b, h, q_idx, kv_idx):
-                    return score + self.rpe[q_idx - kv_idx]
+                self.rpe = torch.randn((2*config.pos_max_len+1, self.head_dim), device=config.device) / (self.head_dim ** 0.5)
+                
             else:
                 raise ValueError("Flash Attention with RPE is currently only supported on CUDA devices.")
         
@@ -63,12 +62,7 @@ class MultiHeadAttention(nn.Module):
             K = self.rotary_emb(K)
             
         if self.flash and (not get_attn):
-            if self.pos_enc == "rpe":
-                # Because the sparsity pattern is independent of batch and heads, we'll set them to None (which broadcasts them) 
-                block_mask = create_block_mask(causal, B=None, H=None, Q_LEN=seq_len, KV_LEN=seq_len)
-                out = flex_attention(Q, K, V, score_mod=relative_positional, block_mask=block_mask)
-            else:
-                out = F.scaled_dot_product_attention(Q, K, V, attn_mask=None, dropout_p=self.dropout, is_causal=True)
+            out = F.scaled_dot_product_attention(Q, K, V, attn_mask=None, dropout_p=self.dropout, is_causal=True)
             out = out.transpose(1,2).contiguous().view(batch_size,seq_len,-1) # (B,T,C)
             out = self.out(out)
             return out, -1

@@ -9,6 +9,8 @@ from util import *
 
 # from torch.utils.data import DataLoader
 from train_utils import *
+from plot import *
+from IPython.display import display, HTML
 
 
 def train_generic(model, config, sampler_config, task_handler=None):
@@ -45,8 +47,8 @@ def train_generic(model, config, sampler_config, task_handler=None):
     for iters in trange(tot_iters):
         data = sampler.generate(epochs=epochs)
         sample, sample_info = data
-        
-        for i in trange(epochs, leave=False):
+        miniters = epochs // 50
+        for i in trange(epochs, leave=False, miniters=miniters):
             step += 1
             model.train()
             batch = sample[i]
@@ -107,3 +109,27 @@ def train_model(model, config, sampler_config):
         "bb": bietti_bb_handler
     }
     return train_generic(model, config, sampler_config, task_handlers.get(sampler_config.task_name, None))
+
+
+def train_model_with_plot(model, config, sampler_config):
+    train_results = train_model(model, config, sampler_config)
+    get_loss_plots(config, train_results, show=True)
+    gif_paths = defaultdict(list)
+    counts = 0
+    for layer in range(config.num_layers):
+        for head in range(config.num_heads[layer]):
+            gif_paths[layer].append(get_attn_gif(layer, head, train_results, config))
+            counts += 1
+    if counts < 3:
+        gifs = [item for sublist in gif_paths.values() for item in sublist]
+        htmls = [f"<td><img src='{gif}' width='500'></td>" for gif in gifs]
+        html_code = "<table><tr>" + "".join(htmls) + "</tr></table>"
+        display(HTML(html_code))
+    else:
+        for layer, paths in gif_paths.items():
+            gifs = [path for path in paths]
+            htmls = [f"<td><img src='{gif}' width='500'></td>" for gif in gifs]
+            html_code = "<table><tr>" + "".join(htmls) + "</tr></table>"
+            display(HTML(html_code))
+
+    return train_results

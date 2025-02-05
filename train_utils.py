@@ -6,17 +6,9 @@ from causal_graph import *
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from tqdm.notebook import tqdm
 from markov import *
+import datetime
+import os
 
-
-def get_batch_size(batch):
-    """
-    Compute the total byte size of a batch, where the batch is a tuple of tensors.
-    """
-    if isinstance(batch, torch.Tensor):
-        return batch.numel() * batch.element_size()
-    
-    total_size = sum(tensor.numel() * tensor.element_size() for tensor in batch)
-    return total_size
 
 def get_bayes_loss(bayes_prob, prob):
     return -torch.sum(prob * torch.log(bayes_prob), dim=-1).mean()
@@ -75,3 +67,20 @@ def get_bigram_icl_loss(outputs, targets, out_mask, criterion):
 
 def get_train_result(**kwargs):
     return kwargs
+
+
+def save_model(model, config, train_results):
+    os.makedirs("models", exist_ok=True)
+    model_name = f"{config.task_name}_{config.num_heads}H_{config.num_layers}L"
+    if any(config.mlp):
+        model_name += "_MLP"
+    if any(config.activation):
+        model_name += "_ReLU"
+    model_name += f"_{config.pos_enc}"
+    model_name += f"_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    torch.save({
+        'model_state_dict': model.state_dict(),
+        'config': config,
+        'train_results': train_results
+    }, f"models/{model_name}.pt")
+    print(f"Model saved as {model_name}.pt")

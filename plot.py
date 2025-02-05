@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
+
 import os
 import shutil
 from PIL import Image
@@ -11,11 +12,13 @@ from datetime import datetime
 from causal_graph import dag_to_adj
 from tqdm.notebook import tqdm
 from scipy.interpolate import make_interp_spline
+from IPython.display import display, HTML
 
 def moving_average(y, window_size=5):
     return np.convolve(y, np.ones(window_size)/window_size, mode='valid')
 
-def get_loss_plots(config, train_results):
+def get_loss_plots(config, train_results, folder="loss_plots", show=False, log=True):
+    os.makedirs(folder, exist_ok=True)
     task_name = config.task_name
     train_losses, eval_losses, eval_steps = train_results["train_losses"], train_results["eval_losses"], train_results["eval_steps"]
     ngramLosses = train_results["ngramLosses"] if "ngramLosses" in train_results else []
@@ -44,15 +47,23 @@ def get_loss_plots(config, train_results):
         color = cmap(i)
         plt.axhline(y=ngramLosses[i], linestyle='-', label=f'{i+1}-gram Loss', color=color)
     
+    if log:
+        plt.xscale('log')
     plt.xlabel('Epochs')
     plt.ylabel('Loss')
     is_mlp = any(config.mlp)
     mlp = "no" if not is_mlp else "with"
     linear = "(linear)" if (is_mlp and not any(config.activation)) else "" 
-    plt.title(f'{task_name}: {config.num_heads}-Heads {config.num_layers} Layers {mlp} MLP {linear} Loss ({config.pos_enc})')
+    plt.title(f'{task_name}: {", ".join(map(str, config.num_heads))}-Heads {config.num_layers} Layers {mlp} MLP {linear} Loss ({config.pos_enc})')
     plt.legend()
     plt.grid()
-    plt.show()
+    curr_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+    image_path = f"{folder}/l{config.num_layers}h{"_".join(map(str, config.num_heads))}v{config.vocab_size}{task_name}_{curr_time}.png"
+    plt.savefig(image_path)
+    print("Loss plot saved at ", image_path)
+    if show:
+        plt.show()
+    plt.close()
 
 
 def plot_probes(train_results, config):
@@ -67,7 +78,7 @@ def plot_probes(train_results, config):
     is_mlp = any(config.mlp)
     mlp = "no" if not is_mlp else "with"
     linear = "(linear)" if is_mlp and not any(config.activation) else "" 
-    plt.title(f'{config.num_heads} Heads {config.num_layers} Layers {mlp} MLP {linear} Recall ({config.pos_enc})')
+    plt.title(f'{",".join(map(str, config.num_heads))} Heads {config.num_layers} Layers {mlp} MLP {linear} Recall ({config.pos_enc})')
     plt.legend()
     plt.grid()
     plt.show()
@@ -97,7 +108,7 @@ def remove_readonly(func, path, exc_info):
     func(path)  # Retry removal
 
 
-def get_attn_gif(layer, head, train_results, config, dag=None, folder="attns", out_folder="attns_plot"):
+def get_attn_gif(layer, head, train_results, config, dag=None, folder="attns", out_folder="attns_plot", show=False):
     task_name = config.task_name
     attn_maps = train_results["attn_maps"]
     image_paths = []
@@ -106,17 +117,18 @@ def get_attn_gif(layer, head, train_results, config, dag=None, folder="attns", o
         print(f"Deleted: {folder}")
     
     os.makedirs(folder)
-    for i, attn in tqdm(attn_maps.items()):
+    miniters = (len(attn_maps)//10)
+    for i, attn in tqdm(attn_maps.items(), miniters=miniters, desc="Creating images"):
         if dag is None:
             if head != "all":
                 plt.figure(figsize=(6, 6))
-                sns.heatmap(attn[layer][head].cpu(), cmap="viridis", annot=False, cbar=True)
-                plt.title(f"Epoch {i + 1}")
+                sns.heatmap(attn[layer][head].cpu(), cmap="viridis", annot=False, cbar=False)
+                plt.title(f"Layer {layer}, Head {head}, Epoch {i + 1}")
             else:
                 h = config.num_heads[layer]
                 fig, axes = plt.subplots(1, h, figsize=(6*h, 6))
                 for j in range(h):
-                    sns.heatmap(attn[layer][j].cpu(), ax=axes[j], cmap="viridis", annot=False, cbar=True)
+                    sns.heatmap(attn[layer][j].cpu(), ax=axes[j], cmap="viridis", annot=False, cbar=False)
                     axes[j].set_title(f"Head {j+1} at Epoch {i + 1}")
                 plt.tight_layout()
         else:
@@ -165,6 +177,9 @@ def get_attn_gif(layer, head, train_results, config, dag=None, folder="attns", o
     print(f"GIF saved at {output_gif_path}")
     shutil.rmtree(folder, onerror=remove_readonly)
     print(f"Folder '{folder}' and its contents removed.")
+    if show:
+        display(HTML(f'<img src="{output_gif_path}" width="500px">'))
+    return output_gif_path
 
 def get_pos_sim(config, model):
     range_pos_toks = torch.arange(config.seq_len).to(config.device)

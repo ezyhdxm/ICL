@@ -71,4 +71,4 @@ class Transformer(nn.Module):
                 self.atten_maps[i] = attn_map.mean(dim=0)
             
         logits = self.output_layer(x)
-        return logits, self.atten_maps 
+        return logits, self.atten_maps
