@@ -17,8 +17,10 @@ import train
 import plot
 from util import memory_recall_probe, feedforward_probe
 import seaborn as sns
-from tqdm import trange
+from tqdm import trange, tqdm
 train.trange = trange
+train.tqdm = tqdm
+plot.tqdm = tqdm
 
 import sys
 import argparse
@@ -73,13 +75,13 @@ def main():
     parser.add_argument('--feedforward_dim', '-ff', type=int, default=16)
     parser.add_argument('--layer_norm', '-ln', action='store_true')
     
-    parser.add_argument('--ngram_learner', '-ng', action='store_true')
-    parser.add_argument('--max_gram', '-mg', type=int, default=2)
+    parser.add_argument('--ngram_learner', '-ng', type=int, default=2)
 
     parser.add_argument('--learning_rate', '-lr', type=float, default=2e-4)
     
 
     parser.add_argument('--order', '-o', type=int, default=1)
+    parser.add_argument('--plot', '-pl', action='store_false')
     args = parser.parse_args()
 
     # convert args to dictionary
@@ -105,7 +107,6 @@ def main():
             layer_norm=params['layer_norm'],
             ngram=params['ngram_learner'],
             learning_rate=params['learning_rate'],
-            max_gram=params['max_gram'],
             task_name=params['task_name'],
         )
 
@@ -138,13 +139,20 @@ def main():
     else:
         raise ValueError("Task name not recognized")
         
-        
-
-    model = Transformer(config).to(config.device)
-    train_results = train.train_model(model, config, sampler_config)
-    plot.get_loss_plots(config, train_results)
+    if config.pos_enc in ["abs", "rotary"]:
+        config.flash = True
     
+    model = Transformer(config).to(config.device)
 
+    if params['plot']:
+        train.train_model_with_plot(model, config, sampler_config)
+    
+    else:
+        train_results = train.train_model(model, config, sampler_config)
+        plot.get_loss_plots(config, train_results)
+        return train_results
+    
+    
 
 if __name__ == "__main__":
     main()

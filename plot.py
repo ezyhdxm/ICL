@@ -58,7 +58,7 @@ def get_loss_plots(config, train_results, folder="loss_plots", show=False, log=T
     plt.legend()
     plt.grid()
     curr_time = datetime.now().strftime("%Y%m%d_%H%M")
-    image_path = f"{folder}/s{config.seq_len}p_{config.pos_enc}_l{config.num_layers}h{"_".join(map(str, config.num_heads))}v{config.vocab_size}{task_name}_{curr_time}.png"
+    image_path = f"{folder}/s{config.seq_len}p_{config.pos_enc}_l{config.num_layers}h{'_'.join(map(str, config.num_heads))}v{config.vocab_size}{task_name}_{curr_time}.png"
     plt.savefig(image_path)
     print("Loss plot saved at ", image_path)
     if show:
@@ -117,8 +117,7 @@ def get_attn_gif(layer, head, train_results, config, dag=None, folder="attns", o
         print(f"Deleted: {folder}")
     
     os.makedirs(folder)
-    miniters = (len(attn_maps)//10)
-    for i, attn in tqdm(attn_maps.items(), miniters=miniters, desc="Creating images"):
+    for i, attn in tqdm(attn_maps.items(), mininterval=1, desc="Creating images"):
         if dag is None:
             if head != "all":
                 plt.figure(figsize=(6, 6))

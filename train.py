@@ -42,7 +42,7 @@ def train_generic(model, config, sampler_config, task_handler=None):
             ngramLosses[i] = ngram_loss.item()
     
     step = 0
-    epochs = min(config.num_epochs, 10000)
+    epochs = min(config.num_epochs, 5000)
     tot_iters = config.num_epochs // epochs
     
     for iters in trange(tot_iters):
@@ -136,12 +136,13 @@ def train_model_with_plot(model, config, sampler_config, show=False):
 
     html = get_head_view(model, train_results, config, trunc=0, action="return")
     curr_time = datetime.now().strftime("%Y%m%d_%H%M")
-    html_file_name = f"attns_plot/attn_view_s{config.seq_len}p_{config.pos_enc}_l{config.num_layers}h{"_".join(map(str, config.num_heads))}v{config.vocab_size}{config.task_name}_{curr_time}.html"
+    os.makedirs("attns_plot", exist_ok=True)
+    html_file_name = f"attns_plot/attn_view_s{config.seq_len}p_{config.pos_enc}_l{config.num_layers}h{'_'.join(map(str, config.num_heads))}v{config.vocab_size}{config.task_name}_{curr_time}.html"
     with open(html_file_name, "w", encoding="utf-8") as file:
         file.write(html)
     
-
-    result_file_name = f"train_results/train_results_s{config.seq_len}p_{config.pos_enc}_l{config.num_layers}h{"_".join(map(str, config.num_heads))}v{config.vocab_size}{config.task_name}_{curr_time}.pkl"
+    os.makedirs("train_results", exist_ok=True)
+    result_file_name = f"train_results/train_results_s{config.seq_len}p_{config.pos_enc}_l{config.num_layers}h{'_'.join(map(str, config.num_heads))}v{config.vocab_size}{config.task_name}_{curr_time}.pkl"
     with open(result_file_name, "wb") as file:
         pickle.dump(train_results, file)
     
