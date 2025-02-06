@@ -1,3 +1,7 @@
 .ipynb_checkpoints
 __pycache__
 .DS_Store
+attns_plot
+train_results
+loss_plots
+attns

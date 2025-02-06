@@ -57,8 +57,8 @@ def get_loss_plots(config, train_results, folder="loss_plots", show=False, log=T
     plt.title(f'{task_name}: {", ".join(map(str, config.num_heads))}-Heads {config.num_layers} Layers {mlp} MLP {linear} Loss ({config.pos_enc})')
     plt.legend()
     plt.grid()
-    curr_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-    image_path = f"{folder}/l{config.num_layers}h{"_".join(map(str, config.num_heads))}v{config.vocab_size}{task_name}_{curr_time}.png"
+    curr_time = datetime.now().strftime("%Y%m%d_%H%M")
+    image_path = f"{folder}/s{config.seq_len}p_{config.pos_enc}_l{config.num_layers}h{"_".join(map(str, config.num_heads))}v{config.vocab_size}{task_name}_{curr_time}.png"
     plt.savefig(image_path)
     print("Loss plot saved at ", image_path)
     if show:
@@ -163,8 +163,8 @@ def get_attn_gif(layer, head, train_results, config, dag=None, folder="attns", o
     frames = [Image.open(image_path) for image_path in image_paths]
     os.makedirs(out_folder, exist_ok=True)
     # Get current time
-    curr_time = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_gif_path = f"{out_folder}/l{config.num_layers}h{config.num_heads[layer]}v{config.vocab_size}_L{layer}H{head}{task_name}_{curr_time}.gif"
+    curr_time = datetime.now().strftime("%Y%m%d_%H%M")
+    output_gif_path = f"{out_folder}/s{config.seq_len}p_{config.pos_enc}_l{config.num_layers}h{config.num_heads[layer]}v{config.vocab_size}_L{layer}H{head}{task_name}_{curr_time}.gif"
     
     frames[0].save(
         output_gif_path,

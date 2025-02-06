@@ -11,7 +11,8 @@ from util import *
 from train_utils import *
 from plot import *
 from IPython.display import display, HTML
-
+from head_view import *
+import pickle
 
 def train_generic(model, config, sampler_config, task_handler=None):
     sampler = get_sampler(sampler_config)
@@ -41,7 +42,7 @@ def train_generic(model, config, sampler_config, task_handler=None):
             ngramLosses[i] = ngram_loss.item()
     
     step = 0
-    epochs = min(config.num_epochs, 5000)
+    epochs = min(config.num_epochs, 10000)
     tot_iters = config.num_epochs // epochs
     
     for iters in trange(tot_iters):
@@ -111,25 +112,36 @@ def train_model(model, config, sampler_config):
     return train_generic(model, config, sampler_config, task_handlers.get(sampler_config.task_name, None))
 
 
-def train_model_with_plot(model, config, sampler_config):
+def train_model_with_plot(model, config, sampler_config, show=False):
     train_results = train_model(model, config, sampler_config)
-    get_loss_plots(config, train_results, show=True)
+    get_loss_plots(config, train_results, show=show)
     gif_paths = defaultdict(list)
     counts = 0
     for layer in range(config.num_layers):
         for head in range(config.num_heads[layer]):
             gif_paths[layer].append(get_attn_gif(layer, head, train_results, config))
             counts += 1
-    if counts < 3:
-        gifs = [item for sublist in gif_paths.values() for item in sublist]
-        htmls = [f"<td><img src='{gif}' width='500'></td>" for gif in gifs]
-        html_code = "<table><tr>" + "".join(htmls) + "</tr></table>"
-        display(HTML(html_code))
-    else:
-        for layer, paths in gif_paths.items():
-            gifs = [path for path in paths]
+    if show:
+        if counts < 3:
+            gifs = [item for sublist in gif_paths.values() for item in sublist]
             htmls = [f"<td><img src='{gif}' width='500'></td>" for gif in gifs]
             html_code = "<table><tr>" + "".join(htmls) + "</tr></table>"
             display(HTML(html_code))
+        else:
+            for layer, paths in gif_paths.items():
+                gifs = [path for path in paths]
+                htmls = [f"<td><img src='{gif}' width='500'></td>" for gif in gifs]
+                html_code = "<table><tr>" + "".join(htmls) + "</tr></table>"
+                display(HTML(html_code))
 
-    return train_results
+    html = get_head_view(model, train_results, config, trunc=0, action="return")
+    curr_time = datetime.now().strftime("%Y%m%d_%H%M")
+    html_file_name = f"attns_plot/attn_view_s{config.seq_len}p_{config.pos_enc}_l{config.num_layers}h{"_".join(map(str, config.num_heads))}v{config.vocab_size}{config.task_name}_{curr_time}.html"
+    with open(html_file_name, "w", encoding="utf-8") as file:
+        file.write(html)
+    
+
+    result_file_name = f"train_results/train_results_s{config.seq_len}p_{config.pos_enc}_l{config.num_layers}h{"_".join(map(str, config.num_heads))}v{config.vocab_size}{config.task_name}_{curr_time}.pkl"
+    with open(result_file_name, "wb") as file:
+        pickle.dump(train_results, file)
+    

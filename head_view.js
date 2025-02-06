@@ -213,7 +213,7 @@ require.config({
                       const headIndex = +this.parentNode.getAttribute("head-index");
                       if (config.headVis[headIndex])
                           if (d) {
-                              return d[index];
+                              return 3*d[index];
                           } else {
                               return 0.0;
                           }
@@ -357,7 +357,7 @@ require.config({
   
       function lighten(color) {
           const c = d3.hsl(color);
-          const increment = (1 - c.l) * 0.6;
+          const increment = (1 - c.l) * 0.4;
           c.l += increment;
           c.s -= increment;
           return c;

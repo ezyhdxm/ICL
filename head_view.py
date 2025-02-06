@@ -83,14 +83,14 @@ def head_view(attention, tokens=None, layer=None, heads=None, include_layers=Non
         html3 = Javascript(vis_js)
         script = '\n<script type="text/javascript">\n' + html3.data + '\n</script>\n'
 
-        head_html = HTML(html1.data + html2.data + script)
+        head_html = html1.data + html2.data + script
         return head_html
 
     else:
         raise ValueError("'html_action' parameter must be 'view' or 'return")
 
 
-def get_head_view(model, train_results, config, trunc=30):
+def get_head_view(model, train_results, config, trunc=30, action='view'):
     sampler = train_results['sampler']
     batch = sampler.generate()[0][0][:1]
     _, attn_map = model(batch, get_attn=True)
@@ -103,5 +103,7 @@ def get_head_view(model, train_results, config, trunc=30):
 
     trunc_attn = [attn_tensors[l][:1, :config.num_heads[l], trunc:, trunc:] for l in range(config.num_layers)]
     trunc_attn = [trunc_attn[l]/trunc_attn[l].sum(dim=-1, keepdims=True) for l in range(config.num_layers)]
-
-    head_view(trunc_attn, batch[0].tolist()[trunc:], html_action='view')
+    if action == 'view':
+        head_view(trunc_attn, batch[0].tolist()[trunc:], html_action=action)
+    else:
+        return head_view(trunc_attn, batch[0].tolist()[trunc:], html_action=action)
