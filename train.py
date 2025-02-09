@@ -72,7 +72,7 @@ def train_generic(model, config, sampler_config, task_handler=None):
                 outputs = outputs[:,-1,:].reshape(-1, config.vocab_size)
                 loss = criterion(outputs, batch_info)
             else:
-                last_token = outputs[:, -2, :].reshape(-1, config.vocab_size)
+                last_token = outputs[:, -2, :].reshape(-1, config.vocab_size) # (B, V)
                 outputs = outputs[:, :-1, :].reshape(-1, config.vocab_size)
                 loss = criterion(outputs, targets)
                 if is_icl:
@@ -118,9 +118,9 @@ def train_model_with_plot(model, config, sampler_config, show=False):
     gif_paths = defaultdict(list)
     counts = 0
     for layer in range(config.num_layers):
-        for head in range(config.num_heads[layer]):
-            gif_paths[layer].append(get_attn_gif(layer, head, train_results, config))
-            counts += 1
+        # for head in range(config.num_heads[layer]):
+        gif_paths[layer].append(get_attn_gif(layer, "all", train_results, config))
+        counts += 1
     if show:
         if counts < 3:
             gifs = [item for sublist in gif_paths.values() for item in sublist]
@@ -141,8 +141,8 @@ def train_model_with_plot(model, config, sampler_config, show=False):
     with open(html_file_name, "w", encoding="utf-8") as file:
         file.write(html)
     
-    os.makedirs("train_results", exist_ok=True)
-    result_file_name = f"train_results/train_results_s{config.seq_len}p_{config.pos_enc}_l{config.num_layers}h{'_'.join(map(str, config.num_heads))}v{config.vocab_size}{config.task_name}_{curr_time}.pkl"
-    with open(result_file_name, "wb") as file:
-        pickle.dump(train_results, file)
+    # os.makedirs("train_results", exist_ok=True)
+    # result_file_name = f"train_results/train_results_s{config.seq_len}p_{config.pos_enc}_l{config.num_layers}h{'_'.join(map(str, config.num_heads))}v{config.vocab_size}{config.task_name}_{curr_time}.pkl"
+    # with open(result_file_name, "wb") as file:
+    #    pickle.dump(train_results, file)
     

@@ -159,7 +159,7 @@ class InContextDAGTorch:
             if i != len(self.dag)-1:
                 samples[:, i] = torch.multinomial(p, num_samples=1).squeeze()
         
-        return samples.reshape(epochs, -1, seq_len), p.reshape(epochs, -1, self.vocab_size)
+        return samples.reshape(epochs, -1, len(self.dag)-1), p.reshape(epochs, -1, self.vocab_size)
 
     def bayes(self, samples): # samples: (B, seq_len)
         num_samples, seq_len = samples.shape

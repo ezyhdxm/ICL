@@ -2,7 +2,7 @@ import torch
 import torch.nn.functional as F
 from typing import Tuple
 
-# TODO: maybe switching to JAX in the future?
+# TODO: maybe switch to JAX in the future?
 
 # Simple Markov chain sampler
 class MarkovSampler:
@@ -126,6 +126,13 @@ class ICLMarkovSampler:
         self.powers = (self.num_states ** torch.arange(self.order - 1, -1, -1, device=self.device)).long()
         self.dirichlet_dist = torch.distributions.Dirichlet(torch.ones(self.num_states, device=self.device)*self.alpha)
     
+    def get_stationary(self, pi: torch.Tensor)->torch.Tensor:
+        pi_t = pi.transpose(1, 2)  # Transpose each matrix, Shape: (num_samples, num_states, num_states_order)
+        svd_input = pi_t - torch.eye(self.num_states, device=self.device).unsqueeze(0)
+        _, _, v = torch.linalg.svd(svd_input)
+        mu = torch.abs(v[:, -1, :])  # Last singular vector for each matrix
+        return mu / mu.sum(dim=1, keepdim=True)
+
     def generate(self, mode="train", epochs=1):
         num_samples = self.batch_size if mode == "train" else self.test_size
         num_samples *= epochs
@@ -133,14 +140,19 @@ class ICLMarkovSampler:
 
         # Sample all transition probabilities in one go
         trans_matrix = self.dirichlet_dist.sample((num_samples, self.num_states_order,))  # Shape: (num_samples, num_states_order, num_states)
-        trans_matrix /= trans_matrix.sum(dim=1, keepdim=True)
-        
+        trans_matrix /= trans_matrix.sum(dim=-1, keepdim=True)
+
         # Initialize the samples tensor
         samples = torch.zeros((num_samples, self.seq_len), dtype=torch.long, device=self.device)
-        
-        # Initialize the state (randomly choose starting states for each sequence)
-        state = torch.randint(high=self.num_states, size=(num_samples, self.order), device=self.device) # Shape: (num_samples, order)
-        samples[:, :self.order] = state
+
+        if self.order == 1:
+            mu = self.get_stationary(trans_matrix) # Shape: (num_samples, num_states)
+            state = torch.multinomial(mu, num_samples=1) # Shape: (num_samples,1)
+            samples[:, :self.order] = state
+        else:
+            # Initialize the state (randomly choose starting states for each sequence)
+            state = torch.randint(high=self.num_states, size=(num_samples, self.order), device=self.device) # Shape: (num_samples, order)
+            samples[:, :self.order] = state
             
         for t in range(self.order, self.seq_len):
             state_indices = torch.sum(state * self.powers, dim=1) #shape: (num_samples,)

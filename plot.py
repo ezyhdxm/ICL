@@ -119,7 +119,8 @@ def get_attn_gif(layer, head, train_results, config, dag=None, folder="attns", o
     os.makedirs(folder)
     for i, attn in tqdm(attn_maps.items(), mininterval=1, desc="Creating images"):
         if dag is None:
-            if head != "all":
+            if head != "all" or config.num_heads[layer]==1:
+                head = 0
                 plt.figure(figsize=(6, 6))
                 sns.heatmap(attn[layer][head].cpu(), cmap="viridis", annot=False, cbar=False)
                 plt.title(f"Layer {layer}, Head {head}, Epoch {i + 1}")

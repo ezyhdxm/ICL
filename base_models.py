@@ -70,5 +70,5 @@ class Transformer(nn.Module):
             if torch.is_tensor(attn_map):
                 self.atten_maps[i] = attn_map.mean(dim=0)
             
-        logits = self.output_layer(x)
+        logits = self.output_layer(x) # (batch_size, seq_len, vocab_size)
         return logits, self.atten_maps
