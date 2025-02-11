@@ -25,8 +25,8 @@ class TFBlock(nn.Module):
         self.dropout = nn.Dropout(config.dropout) if config.dropout else None
 
         if config.mlp[layer]:
-            assert config.ff_dim is not None, "FeedForward dimension cannot be empty."
             if config.activation[layer]:
+                assert config.ff_dim is not None, "FeedForward dimension cannot be empty."
                 self.mlp = nn.Sequential(
                     nn.Linear(config.emb_dim, config.ff_dim),
                     nn.ReLU(),
@@ -37,16 +37,13 @@ class TFBlock(nn.Module):
             self.ln2 = nn.LayerNorm(config.emb_dim) if config.layer_norm else nn.Identity()
 
     def forward(self, x, get_attn=False):
+        x = self.ln1(x)
         attn_map = -1
         atten_out, attn_map = self.MHA(x, get_attn)
         x = x + self.dropout(atten_out) if self.dropout is not None else x + atten_out
-        x = self.ln1(x)
         if self.mlp is not None:
-            mlp_out = self.mlp(x)
-            if self.dropout is not None:
-                x = self.ln2(x + self.dropout(mlp_out))
-            else:
-                x = self.ln2(x + mlp_out)
+            mlp_out = self.mlp(self.ln2(x))
+            x = x + self.dropout(mlp_out) if self.dropout is not None else x + mlp_out
         return x, attn_map 
         
 class Transformer(nn.Module):
