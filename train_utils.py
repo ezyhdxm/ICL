@@ -49,7 +49,8 @@ def get_sampler(sampler_config):
         "bb": BBTask,
         "dag": InContextDAGTorch,
         "tree": InContextTreeTorch,
-        "icl-mc": ICLMarkovSampler
+        "icl-mc": ICLMarkovSampler,
+        "icl-frm": FRMarkovSampler,
     }
     if sampler_config.task_name in task_samplers:
         return task_samplers[sampler_config.task_name](sampler_config)

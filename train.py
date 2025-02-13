@@ -112,9 +112,9 @@ def train_model(model, config, sampler_config):
     return train_generic(model, config, sampler_config, task_handlers.get(sampler_config.task_name, None))
 
 
-def train_model_with_plot(model, config, sampler_config, show=False):
+def train_model_with_plot(model, config, sampler_config, show=False, log=True):
     train_results = train_model(model, config, sampler_config)
-    get_loss_plots(config, train_results, show=show)
+    get_loss_plots(config, train_results, show=show, log=log)
     gif_paths = defaultdict(list)
     counts = 0
     for layer in range(config.num_layers):

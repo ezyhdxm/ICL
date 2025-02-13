@@ -59,6 +59,8 @@ class MarkovSamplerConfig(BaseConfig):
     order: int = 2
     alpha: float = 1
     dag: list = None
+    rho: float = 0.5
+
 
 
 @dataclass

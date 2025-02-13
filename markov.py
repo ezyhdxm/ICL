@@ -395,3 +395,65 @@ class ngramLearner:
         return loss
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+# Fixed Random Markov chain sampler
+class FRMarkovSampler:
+    def __init__(self, config):
+        self.seq_len = config.seq_len
+        self.num_states = config.vocab_size
+        self.order = config.order
+        self.num_states_order = self.num_states ** self.order
+        self.batch_size = config.batch_size
+        self.test_size = config.test_size
+        self.device = config.device
+        self.dirichlet_dist = torch.distributions.Dirichlet(torch.ones(self.num_states, device=self.device)*config.alpha)
+        self.powers = (self.num_states ** torch.arange(self.order - 1, -1, -1, device=self.device)).long()
+        # Sample all transition probabilities in one go
+        self.base_trans_matrix = self.dirichlet_dist.sample((self.num_states_order,))  # Shape: (num_states_order, num_states)
+        self.base_trans_matrix /= self.base_trans_matrix.sum(dim=1, keepdim=True)
+        self.random_rows_size = int(config.rho * self.num_states_order) # proportion of rows that have a random transition
+        self.random_rows = torch.randperm(self.num_states_order)[:self.random_rows_size] # pick random rows
+        print(f"Random rows: {self.random_rows}")
+        
+    
+    def generate(self, epochs=1, mode:str="train")-> torch.Tensor:
+        num_samples = self.batch_size if mode == "train" else self.test_size
+        num_samples *= epochs
+        trans_mat = self.base_trans_matrix.unsqueeze(0).repeat((num_samples, 1, 1)) # Shape: (num_samples, num_states_order, num_states)
+        trans_random = self.dirichlet_dist.sample((num_samples, self.random_rows_size,))  # Shape: (num_samples, random_rows_size, num_states)
+        trans_mat[:, self.random_rows] = trans_random
+        
+        range_vecs = torch.arange(num_samples, device=self.device)
+        
+        # Initialize the samples tensor
+        samples = torch.zeros((num_samples, self.seq_len), dtype=torch.long, device=self.device)
+        
+        state = torch.randint(high=self.num_states, size=(num_samples, self.order), device=self.device) # Shape: (num_samples, order)
+        samples[:, :self.order] = state
+            
+        for t in range(self.order, self.seq_len):
+            state_indices = torch.sum(state * self.powers, dim=1) #shape: (num_samples,)
+            probs = trans_mat[range_vecs, state_indices, :]  # Shape: (num_samples, num_states)
+            
+            # Sample the next states for the entire batch
+            next_states = torch.multinomial(probs, num_samples=1).squeeze(1)
+            
+            # Update the sequence with the sampled next states
+            samples[:, t] = next_states
+            
+            # Update the state window (shift left and append the new state)
+            state[:, :-1] = state[:, 1:]  # Shift left
+            state[:, -1] = next_states    # Append new state
+        
+        return samples.reshape(epochs, -1, self.seq_len), probs.reshape(epochs, -1, self.num_states)
