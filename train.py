@@ -1,9 +1,10 @@
 from tqdm.notebook import trange, tqdm
 import torch
 import torch.nn as nn  
-from markov import *
+from tasks.markov import *
+from ngram_learner import *
 from collections import defaultdict
-from causal_graph import *
+from tasks.causal_graph import *
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from util import *
 

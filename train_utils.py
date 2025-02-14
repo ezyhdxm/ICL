@@ -2,10 +2,11 @@ import torch
 from torch.utils.data import Dataset
 from collections import defaultdict
 from util import *
-from causal_graph import *
+from tasks.causal_graph import *
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from tqdm.notebook import tqdm
-from markov import *
+from tasks.markov import *
+from ngram_learner import *
 import datetime
 import os
 

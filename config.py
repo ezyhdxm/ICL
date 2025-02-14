@@ -60,6 +60,7 @@ class MarkovSamplerConfig(BaseConfig):
     alpha: float = 1
     dag: list = None
     rho: float = 0.5
+    fixed: bool = False
 
 
 

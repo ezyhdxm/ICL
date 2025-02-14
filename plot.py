@@ -9,7 +9,7 @@ import numpy as np
 import seaborn as sns
 import stat
 from datetime import datetime
-from causal_graph import dag_to_adj
+from tasks.causal_graph import dag_to_adj
 from tqdm.notebook import tqdm
 from scipy.interpolate import make_interp_spline
 from IPython.display import display, HTML

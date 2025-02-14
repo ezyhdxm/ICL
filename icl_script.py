@@ -8,10 +8,11 @@ from PIL import Image
 from itertools import product
 from dataclasses import dataclass
 from collections import namedtuple, defaultdict
-from markov import *
+from tasks.markov import *
+from ngram_learner import *
 from base_models import *
 from pos_encoder import *
-from causal_graph import *
+from tasks.causal_graph import *
 from config import *
 import train
 import plot
