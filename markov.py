@@ -327,6 +327,7 @@ class ngramLearner:
         self.num_states_order = config.vocab_size**self.order
         self.device = config.device
         self.is_icl = is_icl
+        self.
         
         if self.order > 0:
             if not is_icl:
@@ -399,6 +400,85 @@ class ngramLearner:
 
 
 
+# Empirical n-gram learner
+class mixed_ngramLearner:
+    def __init__(self, config, sampler_config, order):
+        self.order = order
+        self.vocab_size = config.vocab_size
+        self.alpha = sampler_config.alpha
+        self.num_states_order = config.vocab_size**self.order
+        self.device = config.device
+        self.random_row_size = int(config.rho * self.num_states_order) # proportion of rows that have a random transition
+        
+        if self.order > 0:
+            self.trans_mat_est = self.alpha * torch.ones((self.num_states_order, self.vocab_size), device=self.device) # (num_states_order, num_states)
+            self.state_powers = self.vocab_size ** torch.arange(self.order - 1, -1, -1, device=self.device)
+            
+        else:
+            self.trans_mat_est = self.alpha*torch.ones((self.vocab_size,), device=self.device)
+    
+    def update(self, batch, mask): 
+        # batch: (B,T); 
+        # mask: (B,T-O), whether to use random transition, mask[:, t] is a bool vector for each sample at step t, true for random transition and false otherwise
+        batch_size, seq_len = batch.shape
+        
+        if self.order > 0:
+            random_transition = self.alpha * torch.ones((batch_size, self.random_row_size, self.vocab_size), device=self.device)
+            states = torch.as_strided(batch, 
+                                      size=(batch_size, seq_len - order, order), 
+                                      stride=(batch.stride(0), batch.stride(1), batch.stride(1)))  # (B, T-O, O)
+            next_states = batch[:, self.order:]  # (B, T-O)
+
+            # Compute state indices as base-vocab_size numbers
+            state_indices = torch.sum(states * self.state_powers, dim=2)  # (B, T-O)
+            values = torch.ones_like(state_indices[:,0], dtype=torch.float, device=self.device)  # Same size as positions
+            # Update transition matrix
+            for t in range(state_indices.size(1)):  # Loop over sequence length (T-O)
+                # Add values to the specified positions
+                # the following is equivalent to: self.trans_mat_est[state_indices[b, t], next_states[b, t]] += 1, if  mask[b,t] is False for all b
+                self.trans_mat_est.index_put_((state_indices[~mask[:,t],t], next_states[~mask[:,t],t]), values, accumulate=True) # TODO: take a look at scatter_add_
+                # the following is equivalent to: random_transition[b, state_indices[b, t], next_states[b, t]] += 1, if  mask[b,t] is True for all b
+                random_transition[torch.arange(batch_size), state_indices[mask[:,t],t], next_states[mask[:,t],t]] += 1. # there will not be any overlap in this case
+        else:
+            if not self.is_icl:
+                self.trans_mat_est += torch.bincount(batch.flatten(), minlength=self.vocab_size)
+            else:
+                bin_counts = torch.stack([torch.bincount(batch[i], minlength=self.vocab_size) for i in range(batch_size)])
+                self.trans_mat_est = bin_counts / (bin_counts.sum(dim=-1, keepdim=True)+1e-6)
+                
+    def predict(self, batch, mask):
+        batch_size, seq_len = batch.size()
+        if self.order > 0:
+            probs = torch.zeros((batch_size, seq_len, self.vocab_size), device=self.device) # (B, T, N)
+            uniform = torch.ones((self.vocab_size,), device=self.device) / self.vocab_size # N
+            probs[:,:self.order,:] = uniform.repeat(batch_size, self.order, 1)
+            states = torch.as_strided(batch, 
+                                      size=(batch_size, seq_len - order, order), 
+                                      stride=(batch.stride(0), batch.stride(1), batch.stride(1))) # (B, T-O, O)
+            state_indices = torch.sum(states * self.state_powers, dim=2)  # (B, T-O) 
+            for t in range(state_indices.size(1)):
+                probs[~mask[:, t], self.order+t, :] = self.trans_mat_est[state_indices[~mask[:,t],t]] / self.trans_mat_est[state_indices[~mask[:,t],t]].sum(dim=-1, keepdim=True)
+                probs[mask[:, t], self.order+t, :] = random_transition[mask[:, t], state_indices[~mask[:,t],t]] / random_transition[mask[:, t], state_indices[~mask[:,t],t]].sum(dim=-1, keepdim=True)
+            else:
+                batch_indices = torch.arange(batch_size).unsqueeze(1)
+                probs[:, self.order:] = self.trans_mat_est[batch_indices, state_indices] 
+            return probs
+
+        else:
+            if not self.is_icl:
+                targets = batch.reshape(-1)
+                probs = self.trans_mat_est / self.trans_mat_est.sum()
+                probs = probs.unsqueeze(0).repeat(targets.size(0), 1)
+                return probs.reshape(batch_size, seq_len, self.vocab_size)
+            else:
+                probs = self.trans_mat_est.unsqueeze(1).repeat(1, seq_len, 1)
+                return probs
+            
+    def loss(self, batch):
+        probs = self.predict(batch)
+        one_hot_labels = F.one_hot(batch, num_classes=self.vocab_size).float()
+        loss = -torch.sum(one_hot_labels * torch.log(probs+1e-6)) / (batch.size(0) * batch.size(1))
+        return loss
 
 
 
