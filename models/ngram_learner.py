@@ -4,12 +4,12 @@ import torch.nn.functional as F
 
 # Empirical n-gram learner
 class ngramLearner:
-    def __init__(self, config, sampler_config, order, is_icl=False):
+    def __init__(self, sampler_config, order, is_icl=False):
         self.order = order
-        self.vocab_size = config.vocab_size
+        self.vocab_size = sampler_config.vocab_size
         self.alpha = sampler_config.alpha
-        self.num_states_order = config.vocab_size**self.order
-        self.device = config.device
+        self.num_states_order = sampler_config.vocab_size**self.order
+        self.device = sampler_config.device
         self.is_icl = is_icl
         
         if self.order > 0:
@@ -85,13 +85,14 @@ class ngramLearner:
 
 # Empirical n-gram learner with masked random transitions
 class mixed_ngramLearner:
-    def __init__(self, sampler_config, order):
+    def __init__(self, sampler_config, order, is_icl=True):
         self.order = order
         self.vocab_size = sampler_config.vocab_size
         self.alpha = sampler_config.alpha
         self.num_states_order = sampler_config.vocab_size**self.order
         self.device = sampler_config.device
         self.random_row_size = int(sampler_config.rho * self.num_states_order) # proportion of rows that have a random transition
+        self.is_icl = is_icl
         
         if self.order > 0:
             self.trans_mat_est = self.alpha * torch.ones((self.num_states_order, self.vocab_size), device=self.device) # (num_states_order, num_states)

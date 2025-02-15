@@ -9,13 +9,13 @@ from itertools import product
 from dataclasses import dataclass
 from collections import namedtuple, defaultdict
 from tasks.markov import *
-from ngram_learner import *
-from base_models import *
-from pos_encoder import *
+from models.ngram_learner import *
+from models.base_models import *
+from models.pos_encoder import *
 from tasks.causal_graph import *
 from config import *
 import train
-import plot
+import figures.plot as plot
 from util import memory_recall_probe, feedforward_probe
 import seaborn as sns
 from tqdm import trange, tqdm

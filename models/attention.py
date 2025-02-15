@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.attention.flex_attention import flex_attention, create_block_mask
-from pos_encoder import *
+from models.pos_encoder import *
 
 # TODO: Add MLA, MQA, GQA
 

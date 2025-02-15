@@ -17,7 +17,7 @@ from IPython.display import display, HTML
 def moving_average(y, window_size=5):
     return np.convolve(y, np.ones(window_size)/window_size, mode='valid')
 
-def get_loss_plots(config, train_results, folder="loss_plots", show=False, log=True):
+def get_loss_plots(config, train_results, folder="loss_plots", show=False, log=True, verbose=False):
     os.makedirs(folder, exist_ok=True)
     task_name = config.task_name
     train_losses, eval_losses, eval_steps = train_results["train_losses"], train_results["eval_losses"], train_results["eval_steps"]
@@ -60,7 +60,8 @@ def get_loss_plots(config, train_results, folder="loss_plots", show=False, log=T
     curr_time = datetime.now().strftime("%Y%m%d_%H%M")
     image_path = f"{folder}/s{config.seq_len}p_{config.pos_enc}_l{config.num_layers}h{'_'.join(map(str, config.num_heads))}v{config.vocab_size}{task_name}_{curr_time}.png"
     plt.savefig(image_path)
-    print("Loss plot saved at ", image_path)
+    if verbose:
+        print("Loss plot saved at ", image_path)
     if show:
         plt.show()
     plt.close()
@@ -108,7 +109,7 @@ def remove_readonly(func, path, exc_info):
     func(path)  # Retry removal
 
 
-def get_attn_gif(layer, head, train_results, config, dag=None, folder="attns", out_folder="attns_plot", show=False):
+def get_attn_gif(layer, head, train_results, config, dag=None, folder="attns", out_folder="attns_plot", show=False, log=True, verbose=False):
     task_name = config.task_name
     attn_maps = train_results["attn_maps"]
     image_paths = []
@@ -117,7 +118,14 @@ def get_attn_gif(layer, head, train_results, config, dag=None, folder="attns", o
         print(f"Deleted: {folder}")
     
     os.makedirs(folder)
+    steps = 0
+    n_layer, n_heads, n_voc = config.num_layers, config.num_heads[layer], config.vocab_size
+    
     for i, attn in tqdm(attn_maps.items(), mininterval=1, desc="Creating images"):
+        if i < steps:
+            continue
+
+        steps *= 2
         if dag is None:
             if head != "all" or config.num_heads[layer]==1:
                 head = 0
@@ -154,7 +162,7 @@ def get_attn_gif(layer, head, train_results, config, dag=None, folder="attns", o
 
 
         # Save image
-        image_path = f"{folder}/attn_l{config.num_layers}h{config.num_heads[layer]}v{config.vocab_size}ep{i}_L{layer}H{head}{task_name}.png"
+        image_path = f"{folder}/attn_l{n_layer}h{n_heads}v{n_voc}ep{i}_L{layer}H{head}{task_name}.png"
         plt.savefig(image_path)
         plt.close()
         image_paths.append(image_path)
@@ -164,7 +172,7 @@ def get_attn_gif(layer, head, train_results, config, dag=None, folder="attns", o
     os.makedirs(out_folder, exist_ok=True)
     # Get current time
     curr_time = datetime.now().strftime("%Y%m%d_%H%M")
-    output_gif_path = f"{out_folder}/s{config.seq_len}p_{config.pos_enc}_l{config.num_layers}h{config.num_heads[layer]}v{config.vocab_size}_L{layer}H{head}{task_name}_{curr_time}.gif"
+    output_gif_path = f"{out_folder}/s{config.seq_len}p_{config.pos_enc}_l{n_layer}h{n_heads}v{n_voc}_L{layer}H{head}{task_name}_{curr_time}.gif"
     
     frames[0].save(
         output_gif_path,
@@ -174,9 +182,11 @@ def get_attn_gif(layer, head, train_results, config, dag=None, folder="attns", o
         loop=0  # Infinite loop
     )
     
-    print(f"GIF saved at {output_gif_path}")
+    if verbose:
+        print(f"GIF saved at {output_gif_path}")
     shutil.rmtree(folder, onerror=remove_readonly)
-    print(f"Folder '{folder}' and its contents removed.")
+    if verbose:
+        print(f"Folder '{folder}' and its contents removed.")
     if show:
         display(HTML(f'<img src="{output_gif_path}" width="500px">'))
     return output_gif_path

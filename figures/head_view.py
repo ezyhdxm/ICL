@@ -2,7 +2,7 @@ import json
 import os
 import uuid
 from IPython.core.display import display, HTML, Javascript
-from view_util import *
+from figures.view_util import *
 
 # Adapted from https://github.com/jessevig/bertviz/tree/master
 def head_view(attention, tokens=None, layer=None, heads=None, include_layers=None, html_action='view'):

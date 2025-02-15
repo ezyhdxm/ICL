@@ -12,8 +12,8 @@ import sys
 from torch import nn, Tensor
 from torch.nn import functional as F
 from typing import List, Optional, Tuple
-from pos_encoder import *
-from attention import *
+from models.pos_encoder import *
+from models.attention import *
 
 
 class TFBlock(nn.Module):

@@ -2,7 +2,7 @@ from tqdm.notebook import trange, tqdm
 import torch
 import torch.nn as nn  
 from tasks.markov import *
-from ngram_learner import *
+from models.ngram_learner import *
 from collections import defaultdict
 from tasks.causal_graph import *
 from torch.optim.lr_scheduler import CosineAnnealingLR
@@ -10,9 +10,9 @@ from util import *
 
 # from torch.utils.data import DataLoader
 from train_utils import *
-from plot import *
+from figures.plot import *
 from IPython.display import display, HTML
-from head_view import *
+from figures.head_view import *
 import pickle
 
 def train_generic(model, config, sampler_config, task_handler=None):
@@ -28,6 +28,7 @@ def train_generic(model, config, sampler_config, task_handler=None):
     scheduler = CosineAnnealingLR(optimizer, T_max=config.T_max) if config.scheduler is True else None
     
     is_icl = "icl" in sampler_config.task_name
+    is_mixed = sampler_config.task_name in ["bb", "frm", "bietti"]
     
     test_data, test_info = sampler.generate(mode="test")
     test_data = test_data.squeeze(0)
@@ -35,11 +36,19 @@ def train_generic(model, config, sampler_config, task_handler=None):
     test_target = test_data[:, 1:].reshape(-1)
     
     if config.ngram > 0:
-        ngramLearnerDict = {i:ngramLearner(config, sampler_config, i, is_icl) for i in range(config.ngram)}
+        if is_mixed:
+            ngramLearnerDict = {i:mixed_ngramLearner(sampler_config, i, is_icl) for i in range(config.ngram)}
+
+        else:
+            ngramLearnerDict = {i:ngramLearner(sampler_config, i, is_icl) for i in range(config.ngram)}
 
         for i, learner in ngramLearnerDict.items():
-            learner.update(test_data)
-            ngram_loss = learner.loss(test_data)
+            if not is_mixed:
+                learner.update(test_data)
+                ngram_loss = learner.loss(test_data)
+            else:
+                learner.update(test_data, test_info)
+                ngram_loss = learner.loss(test_data, test_info)
             ngramLosses[i] = ngram_loss.item()
     
     step = 0
