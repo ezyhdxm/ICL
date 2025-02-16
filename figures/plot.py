@@ -67,22 +67,60 @@ def get_loss_plots(config, train_results, folder="loss_plots", show=False, log=T
     plt.close()
 
 
-def plot_probes(train_results, config):
+def plot_probes(train_results, config, folder="loss_plots", show=False, log=True):
     probes = train_results["probes"]
+    task_name = config.task_name
     plt.figure(figsize=(8, 6))
     for pkey in probes.keys():
         plt.plot(range(1, config.num_epochs + 1), probes[pkey], 
                 linestyle='-', label=f'{pkey}')
     
+    if log:
+        plt.xscale('log')
+    
     plt.xlabel('Epochs')
-    plt.ylabel('Mempry Recall & KL divergence')
+    if task_name == "bietti":
+        plt.ylabel('Mempry Recall & KL divergence')
+    else:
+        plt.ylabel('KL divergence')
     is_mlp = any(config.mlp)
     mlp = "no" if not is_mlp else "with"
     linear = "(linear)" if is_mlp and not any(config.activation) else "" 
     plt.title(f'{",".join(map(str, config.num_heads))} Heads {config.num_layers} Layers {mlp} MLP {linear} Recall ({config.pos_enc})')
     plt.legend()
     plt.grid()
-    plt.show()
+    curr_time = datetime.now().strftime("%Y%m%d_%H%M")
+    image_path = f"{folder}/probe_s{config.seq_len}p_{config.pos_enc}_l{config.num_layers}h{'_'.join(map(str, config.num_heads))}v{config.vocab_size}{task_name}_{curr_time}.png"
+    plt.savefig(image_path)
+    if show:
+        plt.show()
+    plt.close()
+
+
+def plot_bigram_icl_risk(config, train_results, folder="loss_plots", show=False, log=True):
+    task_name = config.task_name
+    plt.figure(figsize=(8, 6))
+    plt.plot(range(1, config.num_epochs + 1), train_results["bigram_losses"], 
+            linestyle='-', label='Bigram Risk')
+    plt.plot(range(1, config.num_epochs + 1), train_results["icl_losses"], 
+             linestyle='--', label='ICL Risk')
+    if log:
+        plt.xscale('log')
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    mlp = "no" if config.mlp == False else "with"
+    linear = "(linear)" if config.activation == False else "" 
+    plt.title(f'{task_name}: {config.num_heads} Heads {config.num_layers} Layers {mlp} MLP {linear} Loss Over Epochs ({config.pos_enc})')
+    plt.legend()
+    plt.grid()
+    curr_time = datetime.now().strftime("%Y%m%d_%H%M")
+    log_scale = "log" if log else ""
+    image_path = f"{folder}/icl_s{config.seq_len}p_{config.pos_enc}_l{config.num_layers}h{'_'.join(map(str, config.num_heads))}v{config.vocab_size}_{log_scale}_{task_name}_{curr_time}.png"
+    plt.savefig(image_path)
+    if show:
+        plt.show()
+    plt.close()
+
 
 
 def onerror(func, path, exc_info):
@@ -124,8 +162,14 @@ def get_attn_gif(layer, head, train_results, config, dag=None, folder="attns", o
     for i, attn in tqdm(attn_maps.items(), mininterval=1, desc="Creating images"):
         if i < steps:
             continue
+        
+        if steps < 3000:
+            steps += config.get_attn
+        elif steps < 6000:
+            steps += max(500, config.get_attn)
+        else:
+            steps += max(1000, config.get_attn)
 
-        steps *= 2
         if dag is None:
             if head != "all" or config.num_heads[layer]==1:
                 head = 0
@@ -178,7 +222,7 @@ def get_attn_gif(layer, head, train_results, config, dag=None, folder="attns", o
         output_gif_path,
         save_all=True,
         append_images=frames[1:],
-        duration=100,  # Duration between frames in milliseconds
+        duration=200,  # Duration between frames in milliseconds
         loop=0  # Infinite loop
     )
     
@@ -197,23 +241,6 @@ def get_pos_sim(config, model):
     similar = pos_emb @ pos_emb.t()
     similar = similar.detach().cpu()
     plt.imshow(np.abs(similar))
-    plt.show()
-
-def plot_bigram_icl_risk(config, train_results):
-    task_name = config.task_name
-    plt.figure(figsize=(8, 6))
-    plt.plot(range(1, config.num_epochs + 1), train_results["bigram_losses"], 
-            linestyle='-', label='Bigram Risk')
-    plt.plot(range(1, config.num_epochs + 1), train_results["icl_losses"], 
-             linestyle='--', label='ICL Risk')
-    plt.xscale('log')
-    plt.xlabel('Epochs')
-    plt.ylabel('Loss')
-    mlp = "no" if config.mlp == False else "with"
-    linear = "(linear)" if config.activation == False else "" 
-    plt.title(f'{task_name}: {config.num_heads} Heads {config.num_layers} Layers {mlp} MLP {linear} Loss Over Epochs ({config.pos_enc})')
-    plt.legend()
-    plt.grid()
     plt.show()
 
 def plot_adj_heatmap(adj_mat):

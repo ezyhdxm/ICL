@@ -19,8 +19,11 @@ def last_token_loss(logits, probs):
     log_probs = torch.log_softmax(logits, dim=-1)
     return -torch.sum(probs * log_probs, dim=-1).mean()
 
-def bietti_bb_handler(model, batch, outputs, out_mask, criterion, bigram_losses, icl_losses, probes, sampler_config):
-    bigram_loss, icl_loss = get_bigram_icl_loss(outputs, batch[:, 1:].reshape(-1), out_mask, criterion)
+def bietti_bb_handler(model, batch, outputs, out_mask, criterion, bigram_losses, icl_losses, probes, sampler_config, sampler=None, random_tokens=None, layer=1):
+    if sampler_config.task_name == "frm":
+        bigram_loss, icl_loss = get_bigram_icl_loss(outputs, batch[:, 1:].reshape(-1), out_mask, criterion)
+    else:
+        bigram_loss, icl_loss = get_bigram_icl_error(outputs, batch[:, 1:].reshape(-1), out_mask, criterion)
     bigram_losses.append(bigram_loss)
     icl_losses.append(icl_loss)
 
@@ -29,6 +32,11 @@ def bietti_bb_handler(model, batch, outputs, out_mask, criterion, bigram_losses,
         for pkey in probe_keys:
             probes[pkey].append(memory_recall_probe(sampler_config.vocab_size, model, pkey, sampler_config.seq_len, sampler_config.device))
         probes['ff'].append(feedforward_probe(sampler_config.vocab_size, model, sampler_config.trans_mat, sampler_config.device))
+        probes['out'].append(output_probe(sampler_config.vocab_size, model, sampler.base_trans_matrix, sampler_config.device, random_tokens=random_tokens))
+    
+    elif sampler_config.task_name == "frm":
+        probes['ff'].append(feedforward_probe(sampler_config.vocab_size, model, sampler.base_trans_matrix, sampler_config.device, random_tokens=random_tokens, layer=layer))
+        probes['out'].append(output_probe(sampler_config.vocab_size, model, sampler.base_trans_matrix, sampler_config.device, random_tokens=random_tokens))
 
 class SimulatedDataset(Dataset):
     def __init__(self, sampler, num_samples):
@@ -58,7 +66,7 @@ def get_sampler(sampler_config):
     raise NotImplementedError(f"Task '{sampler_config.task_name}' not implemented yet.")
 
 # Compute bigram ICL loss
-def get_bigram_icl_loss(outputs, targets, out_mask, criterion):
+def get_bigram_icl_error(outputs, targets, out_mask, criterion):
     icl_mask_flat = (out_mask==1)[:,:-1].reshape(-1)
     bigram_loss = criterion(outputs[~icl_mask_flat], targets[~icl_mask_flat])
     preds = torch.argmax(outputs, dim=-1)
@@ -66,6 +74,16 @@ def get_bigram_icl_loss(outputs, targets, out_mask, criterion):
     total = icl_mask_flat.sum()
     icl_loss = icl_error.float() / total.float()
     return bigram_loss.item(), icl_loss.item()
+
+
+def get_bigram_icl_loss(outputs, targets, out_mask, criterion):
+    shifted_mask = torch.roll(out_mask, shifts=1, dims=1)
+    shifted_mask[:, 0] = 0
+    icl_mask_flat = (shifted_mask==1)[:,:-1].reshape(-1)
+    bigram_loss = criterion(outputs[~icl_mask_flat], targets[~icl_mask_flat])
+    icl_loss = criterion(outputs[icl_mask_flat], targets[icl_mask_flat])
+    return bigram_loss.item(), icl_loss.item()
+
 
 def get_train_result(**kwargs):
     return kwargs

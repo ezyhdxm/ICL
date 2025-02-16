@@ -16,8 +16,16 @@ from figures.head_view import *
 import pickle
 
 def train_generic(model, config, sampler_config, task_handler=None):
+    run_time = datetime.now().strftime("%Y%m%d_%H%M")
+
     sampler = get_sampler(sampler_config)
+    if sampler_config.task_name == "frm" and sampler_config.fixed is True:
+        random_tokens = sampler.random_rows
     
+    if sampler_config.task_name in ["frm", "bietti", "bb"]:
+        layer = 0 if config.mlp[0] else 1
+        print(f"Layer: {layer}")
+
     train_losses, eval_losses, eval_steps = [], [], []
     last_token_losses = []
     attn_maps, ngramLosses, bigram_losses, icl_losses, probes = {}, defaultdict(int), [], [], defaultdict(list)
@@ -52,7 +60,7 @@ def train_generic(model, config, sampler_config, task_handler=None):
             ngramLosses[i] = ngram_loss.item()
     
     step = 0
-    epochs = min(config.num_epochs, 5000)
+    epochs = min(config.num_epochs, 500)
     tot_iters = config.num_epochs // epochs
     
     for iters in trange(tot_iters):
@@ -90,13 +98,21 @@ def train_generic(model, config, sampler_config, task_handler=None):
             
             with torch.no_grad():
                 if task_handler:
-                    task_handler(model, batch, outputs, batch_info, criterion, bigram_losses, icl_losses, probes, sampler_config)
+                    if sampler_config.task_name in ["bb", "bietti"]:
+                        task_handler(model, batch, outputs, batch_info, criterion, bigram_losses, icl_losses, probes, sampler_config, layer)
+                    else:
+                        task_handler(model, batch, outputs, batch_info, criterion, bigram_losses, icl_losses, probes, sampler_config, sampler, random_tokens, layer)
             
             train_losses.append(loss.item())
             loss.backward()
             optimizer.step()
             if scheduler:
                 scheduler.step()
+            
+            if config.get_checkpoints > 0 and step % config.get_checkpoints == 0:
+                os.makedirs(f"checkpoints/{config.task_name}/{run_time}", exist_ok=True)
+                curr_time = datetime.now().strftime("%Y%m%d_%H%M")
+                torch.save(model.state_dict(), f"checkpoints/{config.task_name}/{run_time}/model_{curr_time}{step}.pt")
         
             if step % config.eval_iter == 0:
                 with torch.no_grad():
@@ -106,6 +122,8 @@ def train_generic(model, config, sampler_config, task_handler=None):
                     eval_loss = criterion(outputs, test_target) if not is_causal else criterion(outputs, test_info)
                     eval_losses.append(eval_loss.item())
                     eval_steps.append(step)
+            
+            
 
     return get_train_result(train_losses=train_losses, eval_losses=eval_losses, eval_steps=eval_steps,
                             attn_maps=attn_maps, ngramLosses=ngramLosses, bigram_losses=bigram_losses,
@@ -117,19 +135,37 @@ def train_generic(model, config, sampler_config, task_handler=None):
 def train_model(model, config, sampler_config):
     task_handlers = {
         "bietti": bietti_bb_handler,
-        "bb": bietti_bb_handler
+        "bb": bietti_bb_handler,
+        "frm": bietti_bb_handler,
     }
     return train_generic(model, config, sampler_config, task_handlers.get(sampler_config.task_name, None))
 
 
-def train_model_with_plot(model, config, sampler_config, show=False, log=True):
+def train_model_with_plot(model, config, sampler_config, show=False):
+    run_time = datetime.now().strftime("%Y%m%d_%H%M")
+    os.makedirs(f"loss_plots/{run_time}", exist_ok=True)
+
     train_results = train_model(model, config, sampler_config)
-    get_loss_plots(config, train_results, show=show, log=log)
+    
+    folder = f"loss_plots/{run_time}"
+
+    get_loss_plots(config, train_results, folder=folder, show=show, log=False)
+    get_loss_plots(config, train_results, folder=folder, show=show, log=True)
+
+    plot_probes(train_results, config, folder=folder, show=True, log=False)
+    plot_probes(train_results, config, folder=folder, show=True, log=True)
+
+    plot_bigram_icl_risk(config, train_results, folder=folder, show=True, log=False)
+    plot_bigram_icl_risk(config, train_results, folder=folder, show=True, log=True)
+
     gif_paths = defaultdict(list)
     counts = 0
+    attn_folder = f"attns_plot/{run_time}"
+    os.makedirs(attn_folder, exist_ok=True)
+
     for layer in range(config.num_layers):
         # for head in range(config.num_heads[layer]):
-        gif_paths[layer].append(get_attn_gif(layer, "all", train_results, config))
+        gif_paths[layer].append(get_attn_gif(layer, "all", train_results, config, out_folder=attn_folder))
         counts += 1
     if show:
         if counts < 3:
@@ -144,12 +180,18 @@ def train_model_with_plot(model, config, sampler_config, show=False, log=True):
                 html_code = "<table><tr>" + "".join(htmls) + "</tr></table>"
                 display(HTML(html_code))
 
+    if show:
+        get_head_view(model, train_results, config, trunc=0, action="view")
+    
+    
     html = get_head_view(model, train_results, config, trunc=0, action="return")
     curr_time = datetime.now().strftime("%Y%m%d_%H%M")
-    os.makedirs("attns_plot", exist_ok=True)
-    html_file_name = f"attns_plot/attn_view_s{config.seq_len}p_{config.pos_enc}_l{config.num_layers}h{'_'.join(map(str, config.num_heads))}v{config.vocab_size}{config.task_name}_{curr_time}.html"
+    
+    html_file_name = f"{attn_folder}/attn_view_s{config.seq_len}p_{config.pos_enc}_l{config.num_layers}h{'_'.join(map(str, config.num_heads))}v{config.vocab_size}{config.task_name}_{curr_time}.html"
     with open(html_file_name, "w", encoding="utf-8") as file:
         file.write(html)
+    
+    return train_results
     
     # os.makedirs("train_results", exist_ok=True)
     # result_file_name = f"train_results/train_results_s{config.seq_len}p_{config.pos_enc}_l{config.num_layers}h{'_'.join(map(str, config.num_heads))}v{config.vocab_size}{config.task_name}_{curr_time}.pkl"

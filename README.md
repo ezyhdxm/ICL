@@ -1,5 +1,5 @@
 # ICL
-We are interested in understanding how transformers develop the in-context-learning ability through gradient descent. This repo reproduces implemetations of a few ICL experiments. Our implemetation is more efficient compared to some of the original implementations (see the [notebook](./Test.ipynb) for more details). For demostrations of how to run the experiments, see the [notebook](./markov_attn.ipynb). 
+We are interested in understanding how transformers develop the in-context-learning ability through gradient descent. This repo reproduces implemetations of a few ICL experiments. Our implemetation is more efficient compared to some of the original implementations (see the [notebook](./Test.ipynb) for more details). For demostrations of experiments in the previous literature, see the [notebook](./markov_attn.ipynb). 
 
 ### 📖 Citations
 
@@ -28,7 +28,7 @@ We are interested in understanding how transformers develop the in-context-learn
   year={2024}
 }
 ```
-![etp](./attns_plot/l1h1v23_L0H0bb_20250130_174435.gif)
+
 ```bibtex
 @article{nichani2024transformers,
   title={How transformers learn causal structure with gradient descent},
@@ -37,7 +37,7 @@ We are interested in understanding how transformers develop the in-context-learn
   year={2024}
 }
 ```
-![dag](./attns_plot/l2h2v3_L0Hbothdag_20250129_195037.gif)
+
 ```bibtex
 @article{rajaraman2024transformers,
   title={Transformers on markov data: Constant depth suffices},
@@ -46,20 +46,7 @@ We are interested in understanding how transformers develop the in-context-learn
   year={2024}
 }
 ```
-#### Order-2 Markov Chain
-##### First Layer
 
-![order2_0](./attns_plot/l2h2v5_L0Hallmarkov_20250130_194437.gif)
+### Instructions
 
-##### Second Layer
-
-![order2_1](./attns_plot/l2h1v5_L1H0markov_20250130_194705.gif)
-
-#### Order-3 Markov Chain
-##### First Layer
-
-![order3_0](./attns_plot/l2h3v3_L0Hallmarkov_20250130_200657.gif)
-
-##### Second Layer
-
-![order3_1](./attns_plot/l2h1v5_L1H0markov_20250130_195108.gif)
+To run the current ongoing experiments, see the [notebook](./CodeTest.ipynb). 

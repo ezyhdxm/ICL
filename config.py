@@ -45,6 +45,7 @@ class Config(BaseConfig):
     freeze_value: bool = False
     freeze_out: bool = False
     identity_query: bool = False
+    get_checkpoints: int = 50
 
     # Scheduler
     scheduler: bool = False

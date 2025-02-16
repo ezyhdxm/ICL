@@ -18,3 +18,4 @@ class SAE(nn.Module):
         return out
 
 
+# We want to see what input activate the neurons in the hidden layer

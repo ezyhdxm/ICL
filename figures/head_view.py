@@ -90,9 +90,10 @@ def head_view(attention, tokens=None, layer=None, heads=None, include_layers=Non
         raise ValueError("'html_action' parameter must be 'view' or 'return")
 
 
-def get_head_view(model, train_results, config, trunc=30, action='view'):
+def get_head_view(model, train_results, config, trunc=30, action='view', batch=None):
     sampler = train_results['sampler']
-    batch = sampler.generate()[0][0][:1]
+    if batch is None:
+        batch = sampler.generate()[0][0][:1]
     _, attn_map = model(batch, get_attn=True)
 
     trunc = trunc

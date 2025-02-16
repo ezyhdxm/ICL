@@ -91,7 +91,11 @@ class mixed_ngramLearner:
         self.alpha = sampler_config.alpha
         self.num_states_order = sampler_config.vocab_size**self.order
         self.device = sampler_config.device
-        self.random_row_size = int(sampler_config.rho * self.num_states_order) # proportion of rows that have a random transition
+        if sampler_config.task_name in ["bb", "bietti"]:
+            self.random_row_size = sampler_config.k
+        else: 
+            self.random_row_size = int(sampler_config.rho * self.num_states_order) # proportion of rows that have a random transition
+
         self.is_icl = is_icl
         
         if self.order > 0:

@@ -34,12 +34,32 @@ def memory_recall_probe(num_tokens, model, to_probe, seq_len=None, device='cpu')
         q = model.layers[0].MHA.query(pe[1:,:]) # (T-1, D)
         return ((q@k.t()).argmax(-1)==range_pos_toks[:seq_len-1]).float().mean().item()
 
-def feedforward_probe(num_tokens, model, trans_mat, device='cpu'):
+def output_probe(num_tokens, model, trans_mat, device='cpu', random_tokens=None):
     range_toks = torch.arange(num_tokens).to(device)
+    if random_tokens is not None:
+        mask = ~torch.isin(range_toks, random_tokens)
+        range_toks = range_toks[mask]
     toks = model.embed(range_toks)
-    toks = model.layers[1].mlp(toks)
     toks = model.output_layer(toks)
     return F.kl_div(F.log_softmax(toks, dim=1), trans_mat[range_toks], reduction='batchmean').item()
+
+def feedforward_probe(num_tokens, model, trans_mat, device='cpu', random_tokens=None, layer=1):
+    range_toks = torch.arange(num_tokens).to(device)
+    if random_tokens is not None:
+        mask = ~torch.isin(range_toks, random_tokens)
+        range_toks = range_toks[mask]
+    toks = model.embed(range_toks)
+    mlp_out = model.layers[layer].mlp(toks)
+    toks += mlp_out
+    toks = model.output_layer(toks)
+    return F.kl_div(F.log_softmax(toks, dim=1), trans_mat[range_toks], reduction='batchmean').item()
+
+def activation_probe(num_tokens, model, device='cpu'):
+    range_toks = torch.arange(num_tokens).to(device)
+    toks = model.embed(range_toks)
+    toks = model.layers[0].mlp[0](toks)
+    acts = model.layers[0].mlp[1](toks)
+    return toks, acts
 
 #################
 # Get Attention #

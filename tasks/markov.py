@@ -246,6 +246,51 @@ class BiettiTask:
             return samples.reshape(epochs, -1, self.seq_len+off_set), output_mask.reshape(epochs, -1, self.seq_len+off_set)
         
         return samples.reshape(epochs, -1, self.seq_len+off_set)
+    
+    def test(self):
+        num_samples = 1
+        prob_matrix = self.marginal.unsqueeze(0).repeat(num_samples, 1)
+        # Sample without replacement
+        q_toks = torch.multinomial(prob_matrix, self.k, replacement=False)
+        print("triggers: ", q_toks)
+        trans_probs = self.trans_mat[q_toks.reshape(-1)]  # Shape: (num_samples * k, num_states)
+        o_toks = torch.multinomial(trans_probs, num_samples=1).reshape(num_samples, self.k)
+        print("outputs: ", o_toks)
+        samples = torch.zeros((num_samples, self.seq_len), dtype=torch.long, device=self.device)
+        output_mask = torch.zeros((num_samples, self.seq_len), dtype=torch.long, device=self.device)
+
+         # Initialize the state (randomly choose starting states for each sequence)
+        current_tokens = torch.multinomial(prob_matrix, num_samples=1).squeeze(1)
+        samples[:, 0] = current_tokens
+
+        for t in range(1, self.seq_len):
+            # Check if current_tokens are in q_toks
+            matches = (q_toks == current_tokens.unsqueeze(1))  # Shape: (num_samples, k)
+            matched_indices = matches.nonzero(as_tuple=False)  # Indices where matches occur
+
+            # Prepare next tokens
+            nxt_tokens = torch.full((num_samples,), -1, dtype=torch.long, device=self.device)  # Placeholder for next tokens
+
+            # Case 1: Replace with o_toks when current_tokens match q_toks
+            if matched_indices.size(0) > 0:
+                rows, cols = matched_indices[:, 0], matched_indices[:, 1]  # Batch indices and column indices
+                nxt_tokens[rows] = o_toks[rows, cols]  # Assign corresponding o_toks
+                output_mask[rows, t-1] = 1  # Update output mask
+
+            # Case 2: Sample from the transition matrix for unmatched tokens
+            unmatched_mask = nxt_tokens == -1  # Mask for tokens not matched in q_toks
+            unmatched_tokens = current_tokens[unmatched_mask]  # Unmatched tokens
+            if unmatched_tokens.size(0) > 0:
+                transition_probs = self.trans_mat[unmatched_tokens]  # Get transition probabilities
+                sampled_tokens = torch.multinomial(transition_probs, num_samples=1).squeeze(1)  # Sample next tokens
+                nxt_tokens[unmatched_mask] = sampled_tokens
+
+            # Update sequences and current tokens
+            samples[:, t] = nxt_tokens
+            current_tokens = nxt_tokens
+        
+        return samples, output_mask
+    
 
 
 # Bigram Backcopy task: https://arxiv.org/pdf/2410.13835
@@ -338,11 +383,21 @@ class FRMarkovSampler:
         self.random_rows_size = int(config.rho * self.num_states_order) # proportion of rows that have a random transition
         self.fixed = config.fixed
         if self.fixed:
-            self.random_rows = torch.randperm(self.num_states_order)[:self.random_rows_size] # pick random rows
-            self.random_rows = self.random_rows.to(self.device)
+            if self.order == 1:
+                mu = FRMarkovSampler.get_stationary(self.num_states, self.base_trans_matrix) # Shape: (num_states,)
+                self.random_rows = torch.argsort(mu, descending=True)[:self.random_rows_size] # pick rows with highest stationary probability
+            else:
+                self.random_rows = torch.randperm(self.num_states_order)[:self.random_rows_size] # pick random rows
+                self.random_rows = self.random_rows.to(self.device)
         
             print(f"Random rows: {self.random_rows}")
-        
+    
+    @staticmethod
+    def get_stationary(num_states:int, pi: torch.Tensor)->torch.Tensor:
+        svd_input = pi.transpose(0, 1) - torch.eye(num_states, device=pi.device)
+        _, _, v = torch.linalg.svd(svd_input)
+        mu = torch.abs(v[-1, :])  # Last singular vector for each matrix
+        return mu / mu.sum(dim=-1, keepdim=True)
     
     def generate(self, epochs=1, mode:str="train")-> torch.Tensor:
         num_samples = self.batch_size if mode == "train" else self.test_size
@@ -394,3 +449,56 @@ class FRMarkovSampler:
             state[:, -1] = next_states    # Append new state
         
         return samples.reshape(epochs, -1, self.seq_len), output_mask.reshape(epochs, -1, self.seq_len)
+    
+
+    def test(self):
+        num_samples = 1
+        trans_random = self.dirichlet_dist.sample((num_samples, self.random_rows_size,))  # Shape: (num_samples, random_rows_size, num_states)
+        
+        print(trans_random)
+        
+        output_mask = torch.zeros((num_samples, self.seq_len), dtype=torch.long, device=self.device)
+        
+        if not self.fixed:
+            self.random_rows = torch.argsort(torch.rand(num_samples, self.num_states_order), dim=1)[:, :self.random_rows_size] # shape: (num_samples, random_rows_size)
+            self.random_rows = self.random_rows.to(self.device)
+
+            print(f"Random rows: {self.random_rows}")
+
+        
+        # Initialize the samples tensor
+        samples = torch.zeros((num_samples, self.seq_len), dtype=torch.long, device=self.device)
+        
+        state = torch.randint(high=self.num_states, size=(num_samples, self.order), device=self.device) # Shape: (num_samples, order)
+        samples[:, :self.order] = state
+            
+        for t in range(self.order, self.seq_len):
+            state_indices = torch.sum(state * self.powers, dim=1) # shape: (num_samples,)
+            probs = self.base_trans_matrix[state_indices]  # Shape: (num_samples, num_states)
+            next_states = torch.multinomial(probs, num_samples=1).squeeze(1)
+
+            if self.fixed:
+                matches = self.random_rows==state_indices.unsqueeze(1) # check if the current state is in random rows, shape: (num_samples, random_rows_size)
+                matched_indices = matches.nonzero(as_tuple=False)  # Indices where matches occur, shape: (num_samples, 2)
+            else:
+                # print(state_indices)
+                matches = self.random_rows==state_indices.unsqueeze(1)
+                # print(matches)
+                matched_indices = matches.nonzero(as_tuple=False)
+                # print(matched_indices)
+
+            if matched_indices.size(0) > 0:
+                rows, cols = matched_indices[:, 0], matched_indices[:, 1]  # Batch indices and column indices
+                next_states[rows] = torch.multinomial(trans_random[rows, cols], num_samples=1).squeeze(1)  # Using corresponding random transition
+                output_mask[rows, t-1] = 1  # Update output mask
+            
+            
+            
+            # Update the sequence with the sampled next states
+            samples[:, t] = next_states
+            
+            # Update the state window (shift left and append the new state)
+            state[:, :-1] = state[:, 1:]  # Shift left
+            state[:, -1] = next_states    # Append new state
+        
+        return samples, output_mask
