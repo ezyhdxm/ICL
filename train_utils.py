@@ -36,7 +36,7 @@ def bietti_bb_handler(model, batch, outputs, out_mask, criterion, bigram_losses,
     
     elif sampler_config.task_name == "frm":
         probes['ff'].append(feedforward_probe(sampler_config.vocab_size, model, sampler.base_trans_matrix, sampler_config.device, random_tokens=random_tokens, layer=layer))
-        probes['out'].append(output_probe(sampler_config.vocab_size, model, sampler.base_trans_matrix, sampler_config.device, random_tokens=random_tokens))
+        # probes['out'].append(output_probe(sampler_config.vocab_size, model, sampler.base_trans_matrix, sampler_config.device, random_tokens=random_tokens))
 
 class SimulatedDataset(Dataset):
     def __init__(self, sampler, num_samples):
