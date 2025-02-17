@@ -8,7 +8,7 @@ import torch.nn.functional as F
 
 # See the construction on page 6 of the paper: https://arxiv.org/pdf/2306.00802
 # This probe is to measure to what extend linear weights serve as associate memories.
-def memory_recall_probe(num_tokens, model, to_probe, seq_len=None, device='cpu'):
+def memory_recall_probe(num_tokens, model, to_probe, pos_enc, seq_len=None, device='cpu'):
     range_toks = torch.arange(num_tokens).to(device)
     if to_probe == "wk1": 
         toks_key = model.embed(range_toks)
@@ -28,10 +28,14 @@ def memory_recall_probe(num_tokens, model, to_probe, seq_len=None, device='cpu')
         return (toks.argmax(-1) == range_toks).float().mean().item()
     
     elif to_probe == "wk0":
+        if pos_enc != "abs":
+            return 
+        
         range_pos_toks = torch.arange(seq_len).to(device)
-        pe = model.positional_encoding(range_pos_toks) # (T, D)
-        k = model.layers[0].MHA.key(pe[:-1,:]) # (T-1, D)
-        q = model.layers[0].MHA.query(pe[1:,:]) # (T-1, D)
+        if pos_enc == "abs":
+            pe = model.positional_encoding(range_pos_toks) # (T, D)
+            k = model.layers[0].MHA.key(pe[:-1,:]) # (T-1, D)
+            q = model.layers[0].MHA.query(pe[1:,:]) # (T-1, D)
         return ((q@k.t()).argmax(-1)==range_pos_toks[:seq_len-1]).float().mean().item()
 
 def output_probe(num_tokens, model, trans_mat, device='cpu', random_tokens=None):
@@ -41,7 +45,7 @@ def output_probe(num_tokens, model, trans_mat, device='cpu', random_tokens=None)
         range_toks = range_toks[mask]
     toks = model.embed(range_toks)
     toks = model.output_layer(toks)
-    return F.kl_div(F.log_softmax(toks, dim=1), trans_mat[range_toks], reduction='batchmean').item()
+    return F.kl_div(trans_mat[range_toks].log(), nn.Softmax(dim=1)(toks), reduction='batchmean').item()
 
 def feedforward_probe(num_tokens, model, trans_mat, device='cpu', random_tokens=None, layer=1):
     range_toks = torch.arange(num_tokens).to(device)
@@ -52,7 +56,7 @@ def feedforward_probe(num_tokens, model, trans_mat, device='cpu', random_tokens=
     mlp_out = model.layers[layer].mlp(toks)
     toks += mlp_out
     toks = model.output_layer(toks)
-    return F.kl_div(F.log_softmax(toks, dim=1), trans_mat[range_toks], reduction='batchmean').item()
+    return F.kl_div(trans_mat[range_toks].log(), nn.Softmax(dim=1)(toks), reduction='batchmean').item()
 
 def activation_probe(num_tokens, model, device='cpu'):
     range_toks = torch.arange(num_tokens).to(device)

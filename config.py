@@ -45,7 +45,7 @@ class Config(BaseConfig):
     freeze_value: bool = False
     freeze_out: bool = False
     identity_query: bool = False
-    get_checkpoints: int = 50
+    get_checkpoints: int = 100
 
     # Scheduler
     scheduler: bool = False
@@ -68,21 +68,28 @@ class MarkovSamplerConfig(BaseConfig):
 @dataclass
 class BiettiSamplerConfig(BaseConfig):
     k: int = 2
-    show_latents: bool = False
     marginal: torch.Tensor = None
     trans_mat: torch.Tensor = None
-    show_mask: bool = False
     shakespeare: bool = False
     alpha: float = 1
+    fixed: bool = False
 
     def __post_init__(self):
         num_states = self.vocab_size if self.task_name == "bietti" else self.vocab_size - 1
-        self.marginal = torch.ones((num_states,), device=self.device) / num_states
         if not self.shakespeare:
             prior = torch.ones(num_states, device=self.device) * self.alpha
             dirichlet_dist = torch.distributions.Dirichlet(prior)
             self.trans_mat = dirichlet_dist.sample((num_states,))  # Shape: (vocab_size, vocab_size)
             self.trans_mat /= self.trans_mat.sum(dim=1, keepdim=True)
+            
+            def get_stationary(num_states:int, pi: torch.Tensor)->torch.Tensor:
+                svd_input = pi.transpose(0, 1) - torch.eye(num_states, device=pi.device)
+                _, _, v = torch.linalg.svd(svd_input)
+                mu = torch.abs(v[-1, :])  # Last singular vector for each matrix
+                return mu / mu.sum(dim=-1, keepdim=True)
+            
+            self.marginal = get_stationary(num_states, self.trans_mat)
+
         else:
             raise NotImplementedError("Shakespeare not implemented yet")
         

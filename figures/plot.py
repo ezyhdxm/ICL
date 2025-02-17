@@ -235,10 +235,24 @@ def get_attn_gif(layer, head, train_results, config, dag=None, folder="attns", o
         display(HTML(f'<img src="{output_gif_path}" width="500px">'))
     return output_gif_path
 
-def get_pos_sim(config, model):
-    range_pos_toks = torch.arange(config.seq_len).to(config.device)
-    pos_emb = model.positional_encoding(range_pos_toks)
+def get_pos_sim(seq_len, model, device, pos_enc):
+    
+    if pos_enc == "abs":
+        range_pos_toks = torch.arange(seq_len).to(device)
+        pos_emb = model.positional_encoding(range_pos_toks)
+    elif pos_enc == "rpe":
+        pos_emb = model.layers[0].MHA.PEK.pe[:(seq_len+1)]
+    
+
     similar = pos_emb @ pos_emb.t()
+    similar = similar.detach().cpu()
+    plt.imshow(np.abs(similar))
+    plt.show()
+
+def get_emb_sim(vocab_size, model, device):
+    range_toks = torch.arange(vocab_size).to(device)
+    toks = model.embed(range_toks)
+    similar = toks @ toks.t()
     similar = similar.detach().cpu()
     plt.imshow(np.abs(similar))
     plt.show()

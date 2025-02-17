@@ -75,10 +75,7 @@ class MultiHeadAttention(nn.Module):
         
         elif self.pos_enc == "rotary":
             # self.rotary_emb = RotaryPositionalEmbeddings(self.head_dim, config.pos_max_len)
-            self.freqs_cis = precompute_freqs_cis(
-                self.head_dim,
-                config.pos_max_len * 2,
-                # config.rotary_theta,
+            self.freqs_cis = precompute_freqs_cis(self.head_dim, config.seq_len * 2, # config.rotary_theta,
             ).to(config.device)
         elif self.pos_enc == "alibi":
             self.alibi_emb = AliBiPositionalEncoding(self.n_head)
@@ -94,9 +91,7 @@ class MultiHeadAttention(nn.Module):
             # K = self.rotary_emb(K)
             T = Q.size(2)
             # expected shape for apply_rotary_emb: (batch_size, max_seq_len, num_head, d_head)
-            Q, K = apply_rotary_emb(
-                Q.transpose(1, 2), K.transpose(1, 2), freqs_cis=self.freqs_cis[:T]
-            )
+            Q, K = apply_rotary_emb(Q.transpose(1, 2), K.transpose(1, 2), freqs_cis=self.freqs_cis[:T])
             Q, K = Q.transpose(1, 2), K.transpose(1, 2)
             
         if self.flash and (not get_attn):

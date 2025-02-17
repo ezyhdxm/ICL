@@ -15,15 +15,26 @@ from IPython.display import display, HTML
 from figures.head_view import *
 import pickle
 
+
+
 def train_generic(model, config, sampler_config, task_handler=None):
+
+    MAX_SIZE = 500 * (128 * 1024 * 1024 // (config.batch_size * config.seq_len) // 500)
+
+    print("Max size: ", MAX_SIZE)
+
     run_time = datetime.now().strftime("%Y%m%d_%H%M")
 
     sampler = get_sampler(sampler_config)
-    if sampler_config.task_name == "frm" and sampler_config.fixed is True:
-        random_tokens = sampler.random_rows
+    random_tokens = None
+    if sampler_config.fixed is True:
+        if sampler_config.task_name == "frm":
+            random_tokens = sampler.random_rows
+        if sampler_config.task_name == "bietti":
+            random_tokens = sampler.q_toks
     
     if sampler_config.task_name in ["frm", "bietti", "bb"]:
-        layer = 0 if config.mlp[0] else 1
+        layer = config.mlp.index(True)
         print(f"Layer: {layer}")
 
     train_losses, eval_losses, eval_steps = [], [], []
@@ -60,7 +71,11 @@ def train_generic(model, config, sampler_config, task_handler=None):
             ngramLosses[i] = ngram_loss.item()
     
     step = 0
-    epochs = min(config.num_epochs, 500)
+    early_steps = 1000
+    epochs = min(config.num_epochs, MAX_SIZE)
+    while config.num_epochs % epochs != 0:
+        epochs -= 1
+        
     tot_iters = config.num_epochs // epochs
     
     for iters in trange(tot_iters):
@@ -76,7 +91,9 @@ def train_generic(model, config, sampler_config, task_handler=None):
             optimizer.zero_grad()
             targets = batch[:, 1:].reshape(-1)
 
-            if config.get_attn > 0 and step % config.get_attn == 0:
+            get_attn_flag = (step < early_steps) or (step % early_steps == 0)
+
+            if (config.get_attn) > 0 and (step % config.get_attn == 0) and get_attn_flag:
                 outputs, attn = model(batch, get_attn=True)
                 attn_maps[step] = {l: v.clone() for l, v in attn.items()}
             else:
@@ -98,10 +115,7 @@ def train_generic(model, config, sampler_config, task_handler=None):
             
             with torch.no_grad():
                 if task_handler:
-                    if sampler_config.task_name in ["bb", "bietti"]:
-                        task_handler(model, batch, outputs, batch_info, criterion, bigram_losses, icl_losses, probes, sampler_config, layer)
-                    else:
-                        task_handler(model, batch, outputs, batch_info, criterion, bigram_losses, icl_losses, probes, sampler_config, sampler, random_tokens, layer)
+                    task_handler(model, batch, outputs, batch_info, criterion, bigram_losses, icl_losses, probes, config, sampler, random_tokens, layer)
             
             train_losses.append(loss.item())
             loss.backward()
@@ -111,8 +125,7 @@ def train_generic(model, config, sampler_config, task_handler=None):
             
             if config.get_checkpoints > 0 and step % config.get_checkpoints == 0:
                 os.makedirs(f"checkpoints/{config.task_name}/{run_time}", exist_ok=True)
-                curr_time = datetime.now().strftime("%Y%m%d_%H%M")
-                torch.save(model.state_dict(), f"checkpoints/{config.task_name}/{run_time}/model_{curr_time}{step}.pt")
+                torch.save(model.state_dict(), f"checkpoints/{config.task_name}/{run_time}/model_{step}.pt")
         
             if step % config.eval_iter == 0:
                 with torch.no_grad():

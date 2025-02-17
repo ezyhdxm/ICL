@@ -19,24 +19,24 @@ def last_token_loss(logits, probs):
     log_probs = torch.log_softmax(logits, dim=-1)
     return -torch.sum(probs * log_probs, dim=-1).mean()
 
-def bietti_bb_handler(model, batch, outputs, out_mask, criterion, bigram_losses, icl_losses, probes, sampler_config, sampler=None, random_tokens=None, layer=1):
-    if sampler_config.task_name == "frm":
+def bietti_bb_handler(model, batch, outputs, out_mask, criterion, bigram_losses, icl_losses, probes, config, sampler=None, random_tokens=None, layer=1):
+    if config.task_name == "frm":
         bigram_loss, icl_loss = get_bigram_icl_loss(outputs, batch[:, 1:].reshape(-1), out_mask, criterion)
     else:
         bigram_loss, icl_loss = get_bigram_icl_error(outputs, batch[:, 1:].reshape(-1), out_mask, criterion)
     bigram_losses.append(bigram_loss)
     icl_losses.append(icl_loss)
 
-    if sampler_config.task_name == "bietti":
+    if config.task_name == "bietti":
         probe_keys = ["wk0", "wk1", "wo1"]
         for pkey in probe_keys:
-            probes[pkey].append(memory_recall_probe(sampler_config.vocab_size, model, pkey, sampler_config.seq_len, sampler_config.device))
-        probes['ff'].append(feedforward_probe(sampler_config.vocab_size, model, sampler_config.trans_mat, sampler_config.device))
-        probes['out'].append(output_probe(sampler_config.vocab_size, model, sampler.base_trans_matrix, sampler_config.device, random_tokens=random_tokens))
+            probes[pkey].append(memory_recall_probe(config.vocab_size, model, pkey, config.pos_enc, config.seq_len, config.device))
+        probes['ff'].append(feedforward_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=random_tokens, layer=layer))
+        probes['out'].append(output_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=random_tokens))
     
-    elif sampler_config.task_name == "frm":
-        probes['ff'].append(feedforward_probe(sampler_config.vocab_size, model, sampler.base_trans_matrix, sampler_config.device, random_tokens=random_tokens, layer=layer))
-        # probes['out'].append(output_probe(sampler_config.vocab_size, model, sampler.base_trans_matrix, sampler_config.device, random_tokens=random_tokens))
+    elif config.task_name == "frm":
+        probes['ff'].append(feedforward_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=random_tokens, layer=layer))
+        probes['out'].append(output_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=random_tokens))
 
 class SimulatedDataset(Dataset):
     def __init__(self, sampler, num_samples):
