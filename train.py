@@ -17,13 +17,14 @@ import pickle
 
 
 
-def train_generic(model, config, sampler_config, task_handler=None):
+def train_generic(model, config, sampler_config, task_handler=None, run_time=None):
 
     MAX_SIZE = 500 * (128 * 1024 * 1024 // (config.batch_size * config.seq_len) // 500)
 
     print("Max size: ", MAX_SIZE)
 
-    run_time = datetime.now().strftime("%Y%m%d_%H%M")
+    if run_time is None:
+        run_time = datetime.now().strftime("%Y%m%d_%H%M")
 
     sampler = get_sampler(sampler_config)
     random_tokens = None
@@ -75,7 +76,7 @@ def train_generic(model, config, sampler_config, task_handler=None):
     epochs = min(config.num_epochs, MAX_SIZE)
     while config.num_epochs % epochs != 0:
         epochs -= 1
-        
+
     tot_iters = config.num_epochs // epochs
     
     for iters in trange(tot_iters):
@@ -141,24 +142,31 @@ def train_generic(model, config, sampler_config, task_handler=None):
     return get_train_result(train_losses=train_losses, eval_losses=eval_losses, eval_steps=eval_steps,
                             attn_maps=attn_maps, ngramLosses=ngramLosses, bigram_losses=bigram_losses,
                             icl_losses=icl_losses, probes=probes, sampler=sampler, 
-                            bayes_losses=bayes_losses, last_token_losses=last_token_losses)
+                            bayes_losses=bayes_losses, last_token_losses=last_token_losses, 
+                            config=config, sampler_config=sampler_config)
 
 
 # Train model based on task
-def train_model(model, config, sampler_config):
+def train_model(model, config, sampler_config, run_time=None):
     task_handlers = {
         "bietti": bietti_bb_handler,
         "bb": bietti_bb_handler,
         "frm": bietti_bb_handler,
     }
-    return train_generic(model, config, sampler_config, task_handlers.get(sampler_config.task_name, None))
+    return train_generic(model, config, sampler_config, task_handlers.get(sampler_config.task_name, None), run_time)
 
 
 def train_model_with_plot(model, config, sampler_config, show=False):
     run_time = datetime.now().strftime("%Y%m%d_%H%M")
     os.makedirs(f"loss_plots/{run_time}", exist_ok=True)
 
-    train_results = train_model(model, config, sampler_config)
+    train_results = train_model(model, config, sampler_config, run_time=run_time)
+
+    os.makedirs(f"checkpoints/{config.task_name}/{run_time}", exist_ok=True)
+
+    result_file_name = f"checkpoints/{config.task_name}/{run_time}/train_results.pkl"
+    with open(result_file_name, "wb") as file:
+        pickle.dump(train_results, file)
     
     folder = f"loss_plots/{run_time}"
 
@@ -205,9 +213,4 @@ def train_model_with_plot(model, config, sampler_config, show=False):
         file.write(html)
     
     return train_results
-    
-    # os.makedirs("train_results", exist_ok=True)
-    # result_file_name = f"train_results/train_results_s{config.seq_len}p_{config.pos_enc}_l{config.num_layers}h{'_'.join(map(str, config.num_heads))}v{config.vocab_size}{config.task_name}_{curr_time}.pkl"
-    # with open(result_file_name, "wb") as file:
-    #    pickle.dump(train_results, file)
     

@@ -49,4 +49,4 @@ We are interested in understanding how transformers develop the in-context-learn
 
 ### Instructions
 
-To run the current ongoing experiments, see the [notebook](./CodeTest.ipynb). 
+To run the current ongoing experiments and see some observations, see the [notebook](./CodeTest.ipynb). 

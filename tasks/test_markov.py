@@ -14,9 +14,10 @@ class TopicModel:
         self.test_size = config.test_size
         self.device = config.device
         self.topics = config.topics
+
         dirichlet_dist = torch.distributions.Dirichlet(torch.ones(self.num_states, device=self.device)*config.alpha)
         
-        self.trans_matrix = dirichlet_dist.sample((self.num_states_order,))  # Shape: (num_states_order, num_states)
+        self.trans_matrix = dirichlet_dist.sample((self.topics, self.num_states,))  # Shape: (topics, num_states, num_states)
         self.trans_matrix /= self.trans_matrix.sum(dim=1, keepdim=True)
     
     def generate(self, epochs=1, mode:str="train")-> torch.Tensor:
