@@ -31,13 +31,19 @@ def bietti_bb_handler(model, batch, outputs, out_mask, criterion, bigram_losses,
         probe_keys = ["wk0", "wk1", "wo1"]
         for pkey in probe_keys:
             probes[pkey].append(memory_recall_probe(config.vocab_size, model, pkey, config.pos_enc, config.seq_len, config.device))
+        if layer == 1:
+            probes['ffr'].append(feedforward_residual_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=None))
+        probes['outr'].append(output_residual_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=random_tokens))    
         probes['ff'].append(feedforward_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=random_tokens, layer=layer))
         probes['out'].append(output_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=random_tokens))
     
     elif config.task_name == "frm":
+        if layer == 1:
+            probes['ffr'].append(feedforward_residual_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=None))
         probes['ff'].append(feedforward_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=random_tokens, layer=layer))
         probes['out'].append(output_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=random_tokens))
-
+        probes['outr'].append(output_residual_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=random_tokens))
+        
 class SimulatedDataset(Dataset):
     def __init__(self, sampler, num_samples):
         self.num_samples = num_samples

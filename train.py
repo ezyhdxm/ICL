@@ -19,7 +19,10 @@ import pickle
 
 def train_generic(model, config, sampler_config, task_handler=None, run_time=None):
 
-    MAX_SIZE = 500 * (128 * 1024 * 1024 // (config.batch_size * config.seq_len) // 500)
+    if config.device == "cpu":
+        MAX_SIZE = 500 * (32 * 1024 * 1024 // (config.batch_size * config.seq_len) // 500)
+    else:
+        MAX_SIZE = 500 * (128 * 1024 * 1024 // (config.batch_size * config.seq_len) // 500)
 
     print("Max size: ", MAX_SIZE)
 

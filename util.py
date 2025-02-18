@@ -47,6 +47,20 @@ def output_probe(num_tokens, model, trans_mat, device='cpu', random_tokens=None)
     toks = model.output_layer(toks)
     return F.kl_div(trans_mat[range_toks].log(), nn.Softmax(dim=1)(toks), reduction='batchmean').item()
 
+def output_residual_probe(num_tokens, model, trans_mat, device='cpu', random_tokens=None):
+    range_toks = torch.arange(num_tokens).to(device)
+    if random_tokens is not None:
+        mask = ~torch.isin(range_toks, random_tokens)
+        range_toks = range_toks[mask]
+    toks = model.embed(range_toks)
+    res = model.layers[0].MHA.value(toks)
+    res = model.layers[0].MHA.out(res)
+    res = model.layers[1].MHA.value(res)
+    res = model.layers[1].MHA.out(res)
+    toks += res
+    toks = model.output_layer(toks)
+    return F.kl_div(trans_mat[range_toks].log(), nn.Softmax(dim=1)(toks), reduction='batchmean').item()
+
 def feedforward_probe(num_tokens, model, trans_mat, device='cpu', random_tokens=None, layer=1):
     range_toks = torch.arange(num_tokens).to(device)
     if random_tokens is not None:
@@ -58,6 +72,23 @@ def feedforward_probe(num_tokens, model, trans_mat, device='cpu', random_tokens=
     toks = model.output_layer(toks)
     return F.kl_div(trans_mat[range_toks].log(), nn.Softmax(dim=1)(toks), reduction='batchmean').item()
 
+
+def feedforward_residual_probe(num_tokens, model, trans_mat, device='cpu', random_tokens=None):
+    range_toks = torch.arange(num_tokens).to(device)
+    if random_tokens is not None:
+        mask = ~torch.isin(range_toks, random_tokens)
+        range_toks = range_toks[mask]
+    toks = model.embed(range_toks)
+    res = model.layers[0].MHA.value(toks)
+    res = model.layers[0].MHA.out(res)
+    res = model.layers[1].MHA.value(res)
+    res = model.layers[1].MHA.out(res)
+    mlp_out = model.layers[1].mlp(toks+res)
+    toks += mlp_out
+    toks = model.output_layer(toks)
+    return F.kl_div(trans_mat[range_toks].log(), nn.Softmax(dim=1)(toks), reduction='batchmean').item()
+    
+    
 def activation_probe(num_tokens, model, device='cpu'):
     range_toks = torch.arange(num_tokens).to(device)
     toks = model.embed(range_toks)
