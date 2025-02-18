@@ -56,8 +56,14 @@ class Config(BaseConfig):
 
 
 @dataclass
+class LatentMarkovSamplerConfig(BaseConfig):
+    order: int = 1
+    alpha: float = 1
+    total_trans: int = 2 
+
+@dataclass
 class MarkovSamplerConfig(BaseConfig):
-    order: int = 2
+    order: int = 1
     alpha: float = 1
     dag: list = None
     rho: float = 0.5

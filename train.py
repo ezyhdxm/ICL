@@ -31,7 +31,7 @@ def train_generic(model, config, sampler_config, task_handler=None, run_time=Non
 
     sampler = get_sampler(sampler_config)
     random_tokens = None
-    if sampler_config.fixed is True:
+    if hasattr(sampler_config, 'fixed') and sampler_config.fixed is True:
         if sampler_config.task_name == "frm":
             random_tokens = sampler.random_rows
         if sampler_config.task_name == "bietti":
@@ -44,6 +44,7 @@ def train_generic(model, config, sampler_config, task_handler=None, run_time=Non
     train_losses, eval_losses, eval_steps = [], [], []
     last_token_losses = []
     attn_maps, ngramLosses, bigram_losses, icl_losses, probes = {}, defaultdict(int), [], [], defaultdict(list)
+    many_ngram_losses = {}
     bayes_losses = []
     is_causal = sampler_config.task_name in ["dag", "tree"]
     criterion = nn.CrossEntropyLoss() if not is_causal else last_token_loss
@@ -73,6 +74,12 @@ def train_generic(model, config, sampler_config, task_handler=None, run_time=Non
                 learner.update(test_data, test_info)
                 ngram_loss = learner.loss(test_data, test_info)
             ngramLosses[i] = ngram_loss.item()
+        
+        if sampler_config.task_name == "latent":
+            many_ngramLearnersDict = {i:many_ngramLearners(sampler_config, i, sampler) for i in range(config.ngram)}
+            for i, learner in many_ngramLearnersDict.items():
+                many_ngram_loss = learner.loss()
+                many_ngram_losses[i] = many_ngram_loss
     
     step = 0
     early_steps = 1000
@@ -146,7 +153,7 @@ def train_generic(model, config, sampler_config, task_handler=None, run_time=Non
                             attn_maps=attn_maps, ngramLosses=ngramLosses, bigram_losses=bigram_losses,
                             icl_losses=icl_losses, probes=probes, sampler=sampler, 
                             bayes_losses=bayes_losses, last_token_losses=last_token_losses, 
-                            config=config, sampler_config=sampler_config)
+                            config=config, sampler_config=sampler_config, many_ngram_losses=many_ngram_losses)
 
 
 # Train model based on task

@@ -7,6 +7,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 from tqdm.notebook import tqdm
 from tasks.markov import *
 from models.ngram_learner import *
+from tasks.test_markov import *
 import datetime
 import os
 
@@ -66,6 +67,7 @@ def get_sampler(sampler_config):
         "tree": InContextTreeTorch,
         "icl-mc": ICLMarkovSampler,
         "frm": FRMarkovSampler,
+        "latent": LatentMarkov,
     }
     if sampler_config.task_name in task_samplers:
         return task_samplers[sampler_config.task_name](sampler_config)

@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as F
+from tasks.markov import *
 
 
 # Empirical n-gram learner
@@ -80,6 +81,24 @@ class ngramLearner:
 
 
 
+
+class many_ngramLearners:
+    def __init__(self, sampler_config, order, sampler):
+        self.order = order
+        self.sampler = sampler
+        self.markov_sampler = MarkovSampler(sampler_config)
+        self.sampler_config = sampler_config
+    
+    def loss(self):
+        total_trans = self.sampler.trans_matrix.size(0)
+        loss = 0
+        for i in range(total_trans):
+            ngram_learner = ngramLearner(self.sampler_config, self.order, is_icl=False)
+            self.markov_sampler.trans_matrix = self.sampler.trans_matrix[i]
+            batch = self.markov_sampler.generate(1, mode="test")[0].squeeze()
+            ngram_learner.update(batch)
+            loss += ngram_learner.loss(batch).item()
+        return loss / total_trans
 
 
 

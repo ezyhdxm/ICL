@@ -22,6 +22,7 @@ def get_loss_plots(config, train_results, folder="loss_plots", show=False, log=T
     task_name = config.task_name
     train_losses, eval_losses, eval_steps = train_results["train_losses"], train_results["eval_losses"], train_results["eval_steps"]
     ngramLosses = train_results["ngramLosses"] if "ngramLosses" in train_results else []
+    many_ngram_losses = train_results["many_ngram_losses"] if "many_ngram_losses" in train_results else []
     bayes_losses = train_results["bayes_losses"] if "bayes_losses" in train_results else []
     last_token_losses = train_results["last_token_losses"] if "last_token_losses" in train_results else []
     
@@ -47,6 +48,11 @@ def get_loss_plots(config, train_results, folder="loss_plots", show=False, log=T
         color = cmap(i)
         plt.axhline(y=ngramLosses[i], linestyle='-', label=f'{i+1}-gram Loss', color=color)
     
+    if len(many_ngram_losses) >= 1:
+        for i in range(len(many_ngram_losses)):
+            color = cmap(i)
+            plt.axhline(y=many_ngram_losses[i], linestyle='-', label=f'{i+1}-gram Loss', color=color, alpha=0.5)
+    
     if log:
         plt.xscale('log')
     plt.xlabel('Epochs')
@@ -69,6 +75,9 @@ def get_loss_plots(config, train_results, folder="loss_plots", show=False, log=T
 
 def plot_probes(train_results, config, folder="loss_plots", show=False, log=True):
     probes = train_results["probes"]
+    if len(probes) == 0:
+        return
+    
     task_name = config.task_name
     plt.figure(figsize=(8, 6))
     for pkey in probes.keys():
@@ -98,6 +107,10 @@ def plot_probes(train_results, config, folder="loss_plots", show=False, log=True
 
 
 def plot_bigram_icl_risk(config, train_results, folder="loss_plots", show=False, log=True):
+
+    if len(train_results["bigram_losses"]) == 0:
+        return 
+
     task_name = config.task_name
     plt.figure(figsize=(8, 6))
     plt.plot(range(1, config.num_epochs + 1), train_results["bigram_losses"], 
