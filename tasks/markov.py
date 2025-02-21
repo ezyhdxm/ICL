@@ -191,7 +191,7 @@ class BiettiTask:
             self.q_toks = torch.argsort(self.marginal, descending=True)[:self.k]
             print("Fixed triggers: ", self.q_toks)
     
-    def generate(self, mode="train", epochs=1):
+    def generate(self, mode="train", epochs=1, return_triggers=False):
         if self.seed is not None:
             torch.manual_seed(self.seed)
         num_samples = self.batch_size if mode == "train" else self.test_size
@@ -225,9 +225,9 @@ class BiettiTask:
             # Case 1: Replace with o_toks when current_tokens match q_toks
             if matched_indices.size(0) > 0:
                 rows, cols = matched_indices[:, 0], matched_indices[:, 1]  # Batch indices and column indices
+                output_mask[rows, t-1] = samples[rows, t-1]+1  # Update output mask
                 nxt_tokens[rows] = o_toks[rows, cols]  # Assign corresponding o_toks
-                output_mask[rows, t-1] = 1  # Update output mask
-
+                
             # Case 2: Sample from the transition matrix for unmatched tokens
             unmatched_mask = nxt_tokens == -1  # Mask for tokens not matched in q_toks
             unmatched_tokens = current_tokens[unmatched_mask]  # Unmatched tokens
@@ -240,6 +240,9 @@ class BiettiTask:
             samples[:, t] = nxt_tokens
             current_tokens = nxt_tokens
         
+        if return_triggers:
+            return samples.reshape(epochs, -1, self.seq_len), output_mask.reshape(epochs, -1, self.seq_len), q_toks.reshape(epochs, -1, self.k)
+        
         return samples.reshape(epochs, -1, self.seq_len), output_mask.reshape(epochs, -1, self.seq_len)
         
     
@@ -251,7 +254,7 @@ class BiettiTask:
             self.q_toks = torch.multinomial(prob_matrix, self.k, replacement=False)
         print("triggers: ", self.q_toks)
         trans_probs = torch.ones((num_samples*self.k, self.num_states)).to(self.device)  # Shape: (num_samples * k, num_states)
-        trans_probs[torch.arange(num_samples*self.k), self.q_toks.reshape(-1)] = 0 # Avoid repeating the same token
+        trans_probs[torch.arange(num_samples*self.k), self.q_toks.reshape(-1)] = 0 # Avoid repeating the trigger tokens
         trans_probs /= trans_probs.sum(dim=-1, keepdim=True)  # Shape: (num_samples * k, num_states)
         o_toks = torch.multinomial(trans_probs, num_samples=1).reshape(num_samples, self.k) # Shape: (num_samples, k)
         print("outputs: ", o_toks)
@@ -273,9 +276,9 @@ class BiettiTask:
             # Case 1: Replace with o_toks when current_tokens match q_toks
             if matched_indices.size(0) > 0:
                 rows, cols = matched_indices[:, 0], matched_indices[:, 1]  # Batch indices and column indices
+                output_mask[rows, t-1] = samples[rows, t-1]+1  # Update output mask
                 nxt_tokens[rows] = o_toks[rows, cols]  # Assign corresponding o_toks
-                output_mask[rows, t-1] = 1  # Update output mask
-
+                
             # Case 2: Sample from the transition matrix for unmatched tokens
             unmatched_mask = nxt_tokens == -1  # Mask for tokens not matched in q_toks
             unmatched_tokens = current_tokens[unmatched_mask]  # Unmatched tokens
@@ -290,7 +293,59 @@ class BiettiTask:
         
         return samples, output_mask, self.q_toks, F.one_hot(o_toks, self.num_states).squeeze(0).float().to(self.device)
     
-
+    
+    def summary(self):
+        batch, output, q_toks = self.generate(epochs=1, mode="test", return_triggers=True)
+        batch = batch.squeeze(0)
+        output = output.squeeze(0)
+        output_mask = (output > 0).float()
+        trigger_stats = [torch.unique(output[i][output[i]!=0], return_counts=True)[1] for i in range(self.test_size)]
+        max_len = max(tensor.size(0) for tensor in trigger_stats)
+        # Pad all tensors to the maximum length
+        trigger_stats = torch.stack([F.pad(tensor, (0, max_len - tensor.size(0)), value=0) for tensor in trigger_stats]).float()
+        max_trigger_count = trigger_stats.max(axis=-1).values.float().mean().item()
+        std_max_trigger_count = trigger_stats.max(axis=-1).values.float().std().item()
+        avg_trigger_count = trigger_stats.mean(axis=-1).mean().item()
+        std_avg_trigger_count = trigger_stats.mean(axis=-1).std().item()
+        n_triggers = output_mask.sum(dim=-1).mean().item()
+        std_n_triggers = output_mask.sum(dim=-1).std().item()
+        
+        pairs = batch.unfold(dimension=1, size=2, step=1).contiguous()
+        encoded_pairs = pairs[:, :, 0] * 100 + pairs[:, :, 1]
+        repeat_stats = [torch.unique(encoded_pairs[i], return_counts=True)[1] for i in range(self.test_size)]
+        # Find the maximum length
+        max_len = max(tensor.size(0) for tensor in repeat_stats)
+        # Pad all tensors to the maximum length
+        repeat_stats = torch.stack([F.pad(tensor, (0, max_len - tensor.size(0)), value=0) for tensor in repeat_stats]).float() # shape: (test_size, seq_len-1)
+        # max_count, total_count, n
+        max_count = repeat_stats.max(axis=-1).values.float().mean().item()
+        std_max_count = repeat_stats.max(axis=-1).values.float().std().item()
+        total_count = repeat_stats.sum(axis=-1).mean().item()
+        std_total_count = repeat_stats.sum(axis=-1).std().item()
+        avg_count = repeat_stats.mean(axis=-1).mean().item()
+        med_count = repeat_stats.median(axis=-1).values.float().mean().item()
+        std_med_count = repeat_stats.median(axis=-1).values.float().std().item()
+        std_avg_count = repeat_stats.mean(axis=-1).std().item()
+        count = repeat_stats > 0
+        n_avg = count.sum(axis=-1).float().mean().item()
+        std_n_avg = count.sum(axis=-1).float().std().item()
+        
+        
+        print("#############################################################################")
+        print(f"     Summary statistics of the sampler: averaged over {self.test_size} samples  ")
+        print("#############################################################################\n")
+        print(f"        Count of the most repeated pair: {max_count:.2f} ({std_max_count:.2f})")
+        print(f"        Total repetitions of repeated pairs: {total_count:.2f} ({std_total_count:.2f})")
+        print(f"        Avg repetitions for each repeated pair: {avg_count:.2f} ({std_avg_count:.2f})")
+        print(f"        Median repetitions for each repeated pair: {med_count:.2f} ({std_med_count:.2f})")
+        print(f"        Number of pairs repeated: {n_avg:.2f} ({std_n_avg:.2f})\n\n")
+        print(f"        Fraction of trigger pairs: {n_triggers/(self.seq_len-1):.2f} ({std_n_triggers/(self.seq_len-1):.2f})")
+        print(f"        Total number of triggers: {n_triggers:.2f} ({std_n_triggers:.2f})")
+        print(f"        Avg repetitions among triggers: {avg_trigger_count:.2f} ({std_avg_trigger_count:.2f})")
+        print(f"        Max repetitions among triggers: {max_trigger_count:.2f} ({std_avg_trigger_count:.2f})")
+        print("#############################################################################")
+        
+        
 
 # Bigram Backcopy task: https://arxiv.org/pdf/2410.13835
 # TODO: add attention visualization

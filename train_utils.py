@@ -37,6 +37,9 @@ def bietti_bb_handler(model, batch, outputs, out_mask, criterion, bigram_losses,
         probes['outr'].append(output_residual_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=random_tokens))    
         probes['ff'].append(feedforward_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=random_tokens, layer=layer))
         probes['out'].append(output_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=random_tokens))
+        probes['attn'].append(attn_icl_probe(config.vocab_size, model, config.device))
+        probes['ff_icl'].append(ff_icl_probe(config.vocab_size, model, config.device))
+        probes['combined_icl'].append(combined_icl_probe(config.vocab_size, model, config.device))
     
     elif config.task_name == "frm":
         if layer == 1:
@@ -44,6 +47,7 @@ def bietti_bb_handler(model, batch, outputs, out_mask, criterion, bigram_losses,
         probes['ff'].append(feedforward_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=random_tokens, layer=layer))
         probes['out'].append(output_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=random_tokens))
         probes['outr'].append(output_residual_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=random_tokens))
+        
         
 class SimulatedDataset(Dataset):
     def __init__(self, sampler, num_samples):
@@ -87,7 +91,7 @@ def get_bigram_icl_error(outputs, targets, out_mask, criterion):
 def get_bigram_icl_loss(outputs, targets, out_mask, criterion):
     shifted_mask = torch.roll(out_mask, shifts=1, dims=1)
     shifted_mask[:, 0] = 0
-    icl_mask_flat = (shifted_mask==1)[:,:-1].reshape(-1)
+    icl_mask_flat = (shifted_mask>0)[:,:-1].reshape(-1)
     bigram_loss = criterion(outputs[~icl_mask_flat], targets[~icl_mask_flat])
     icl_loss = criterion(outputs[icl_mask_flat], targets[icl_mask_flat])
     return bigram_loss.item(), icl_loss.item()

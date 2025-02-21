@@ -96,6 +96,33 @@ def activation_probe(num_tokens, model, device='cpu'):
     acts = model.layers[0].mlp[1](toks)
     return toks, acts
 
+def TV_dist(targets, probs):
+    return torch.sum(torch.abs(targets - probs), axis=-1).mean().item()
+
+def ff_icl_probe(num_tokens, model, device='cpu'):
+    OV_2 = model.layers[1].MHA.value.weight.T @ model.layers[1].MHA.out.weight.T
+    tok = torch.tensor([token for token in range(num_tokens)])
+    tok = model.embed(tok)
+    targets = torch.eye(num_tokens).to(device)
+    probs = nn.Softmax(dim=-1)(model.output_layer(model.layers[1].mlp(tok @ OV_2)))
+    return TV_dist(targets, probs)
+
+def attn_icl_probe(num_tokens, model, device='cpu'):
+    OV_2 = model.layers[1].MHA.value.weight.T @ model.layers[1].MHA.out.weight.T
+    tok = torch.tensor([token for token in range(num_tokens)])
+    tok = model.embed(tok)
+    probs = nn.Softmax(dim=-1)(model.output_layer(tok @ OV_2))
+    targets = torch.eye(num_tokens).to(device)
+    return TV_dist(targets, probs)
+
+def combined_icl_probe(num_tokens, model, device='cpu'):
+    OV_2 = model.layers[1].MHA.value.weight.T @ model.layers[1].MHA.out.weight.T
+    tok = torch.tensor([token for token in range(num_tokens)])
+    tok = model.embed(tok)
+    probs = nn.Softmax(dim=-1)(model.output_layer(tok @ OV_2 + model.layers[1].mlp(tok @ OV_2)))
+    targets = torch.eye(num_tokens).to(device)
+    return TV_dist(targets, probs)
+
 #################
 # Get Attention #
 #################

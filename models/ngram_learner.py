@@ -128,7 +128,7 @@ class mixed_ngramLearner:
         # batch: (B,T); 
         # mask: (B,T-O), whether to use random transition, mask[:, t] is a bool vector for each sample at step t, true for random transition and false otherwise
         batch_size, seq_len = batch.shape
-        mask = mask == 1
+        mask = mask > 0
         
         if self.order > 0:
             self.random_transition = self.alpha * torch.ones((batch_size, self.num_states_order, self.vocab_size), device=self.device)
@@ -163,7 +163,7 @@ class mixed_ngramLearner:
     
     def predict(self, batch, mask):
         batch_size, seq_len = batch.size()
-        mask = mask == 1 # (B, T-O)
+        mask = mask > 0 # (B, T-O)
         if self.order > 0:
             probs = torch.zeros((batch_size, seq_len, self.vocab_size), device=self.device) # (B, T, N)
             uniform = torch.ones((self.vocab_size,), device=self.device) / self.vocab_size # N

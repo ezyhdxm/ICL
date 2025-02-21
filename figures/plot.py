@@ -14,10 +14,10 @@ from tqdm.notebook import tqdm
 from scipy.interpolate import make_interp_spline
 from IPython.display import display, HTML
 
-def moving_average(y, window_size=5):
+def moving_average(y, window_size=3):
     return np.convolve(y, np.ones(window_size)/window_size, mode='valid')
 
-def get_loss_plots(config, train_results, folder="loss_plots", show=False, log=True, verbose=False):
+def get_loss_plots(config, train_results, folder="loss_plots", show=False, verbose=False):
     os.makedirs(folder, exist_ok=True)
     task_name = config.task_name
     train_losses, eval_losses, eval_steps = train_results["train_losses"], train_results["eval_losses"], train_results["eval_steps"]
@@ -26,43 +26,53 @@ def get_loss_plots(config, train_results, folder="loss_plots", show=False, log=T
     bayes_losses = train_results["bayes_losses"] if "bayes_losses" in train_results else []
     last_token_losses = train_results["last_token_losses"] if "last_token_losses" in train_results else []
     
-    plt.figure(figsize=(8, 6))
+    fig, axes = plt.subplots(1, 2, figsize=(6*2, 6))
+    
+    axes[1].set_xscale('log')
+    
     range_vec = range(1, config.num_epochs + 1)
-    plt.plot(range_vec, train_losses, 
-            linestyle='-', color='lightblue', label='Training Loss')
+    train_losses_smoothed = moving_average(train_losses)
+    axes[0].plot(range_vec[:len(train_losses_smoothed)], train_losses_smoothed, linestyle='-', color='lightblue', label='Training Loss')
+    axes[1].plot(range_vec[:len(train_losses_smoothed)], train_losses_smoothed, linestyle='-', color='lightblue', label='Training Loss')
     if len(last_token_losses) >= 1:
         # spline = make_interp_spline(range_vec, last_token_losses, k=3)
         last_token_losses_smoothed = moving_average(last_token_losses)
         
-        plt.plot(range_vec[:len(last_token_losses_smoothed)], last_token_losses_smoothed, 
-                linestyle='-', color="#B39EB5", label='Last Token Training Loss', alpha=0.5)
-    plt.plot(eval_steps, eval_losses, 
-             linestyle='--', color='palevioletred', label='Validation Loss')
+        axes[0].plot(range_vec[:len(last_token_losses_smoothed)], last_token_losses_smoothed, 
+                     linestyle='-', color="#B39EB5", label='Last Token Training Loss', alpha=0.5)
+        axes[1].plot(range_vec[:len(last_token_losses_smoothed)], last_token_losses_smoothed, 
+                     linestyle='-', color="#B39EB5", label='Last Token Training Loss', alpha=0.5)
+    
+    axes[0].plot(eval_steps, eval_losses, linestyle='--', color='palevioletred', label='Validation Loss')
+    axes[1].plot(eval_steps, eval_losses, linestyle='--', color='palevioletred', label='Validation Loss')
 
     if len(bayes_losses) >= 1:
-        plt.plot(range_vec, bayes_losses, 
-                linestyle='-', color='burlywood', label='Bayes Loss')
+        axes[0].plot(range_vec, bayes_losses, linestyle='-', color='burlywood', label='Bayes Loss')
+        axes[1].plot(range_vec, bayes_losses, linestyle='-', color='burlywood', label='Bayes Loss')
         
     cmap = cm.get_cmap('tab10') 
     for i in range(len(ngramLosses)):
         color = cmap(i)
-        plt.axhline(y=ngramLosses[i], linestyle='-', label=f'{i+1}-gram Loss', color=color)
+        axes[0].axhline(y=ngramLosses[i], linestyle='-', label=f'{i+1}-gram Loss', color=color)
+        axes[1].axhline(y=ngramLosses[i], linestyle='-', label=f'{i+1}-gram Loss', color=color)
     
     if len(many_ngram_losses) >= 1:
         for i in range(len(many_ngram_losses)):
             color = cmap(i)
-            plt.axhline(y=many_ngram_losses[i], linestyle='-', label=f'{i+1}-gram Loss', color=color, alpha=0.5)
+            axes[0].axhline(y=many_ngram_losses[i], linestyle='-', label=f'{i+1}-gram Loss', color=color, alpha=0.5)
+            axes[1].axhline(y=many_ngram_losses[i], linestyle='-', label=f'{i+1}-gram Loss', color=color, alpha=0.5)
     
-    if log:
-        plt.xscale('log')
-    plt.xlabel('Epochs')
-    plt.ylabel('Loss')
+    axes[0].set_xlabel('Epochs')
+    axes[1].set_xlabel('Epochs (Log Scale)')
+    axes[0].set_ylabel('Loss')
     is_mlp = any(config.mlp)
     mlp = "no" if not is_mlp else "with"
     linear = "(linear)" if (is_mlp and not any(config.activation)) else "" 
-    plt.title(f'{task_name}: {", ".join(map(str, config.num_heads))}-Heads {config.num_layers} Layers {mlp} MLP {linear} Loss ({config.pos_enc})')
-    plt.legend()
-    plt.grid()
+    axes[0].set_title(f'{task_name}: {", ".join(map(str, config.num_heads))}-Heads {config.num_layers} Layers {mlp} MLP {linear} Loss ({config.pos_enc})')
+    axes[0].grid()
+    axes[1].grid()
+    axes[0].legend()
+    axes[1].legend()
     curr_time = datetime.now().strftime("%Y%m%d_%H%M")
     image_path = f"{folder}/s{config.seq_len}p_{config.pos_enc}_l{config.num_layers}h{'_'.join(map(str, config.num_heads))}v{config.vocab_size}{task_name}_{curr_time}.png"
     plt.savefig(image_path)
@@ -71,33 +81,54 @@ def get_loss_plots(config, train_results, folder="loss_plots", show=False, log=T
     if show:
         plt.show()
     plt.close()
-
+    
 
 def plot_probes(train_results, config, folder="loss_plots", show=False, log=True):
     probes = train_results["probes"]
     if len(probes) == 0:
         return
     
+    flag = "attn" in probes.keys()
+    
+    plot_labels = {"attn": "attn", "ff_icl": "ff", "combined_icl": "ff+attn"}
+    
     task_name = config.task_name
-    plt.figure(figsize=(8, 6))
-    for pkey in probes.keys():
-        plt.plot(range(1, config.num_epochs + 1), probes[pkey], 
-                linestyle='-', label=f'{pkey}')
+    if flag:
+        fig, axes = plt.subplots(1, 2, figsize=(6*2, 6))
     
-    if log:
-        plt.xscale('log')
-    
-    plt.xlabel('Epochs')
-    if task_name == "bietti":
-        plt.ylabel('Mempry Recall & KL divergence')
     else:
-        plt.ylabel('KL divergence')
+        fig, axes = plt.subplots(1, 1, figsize=(6*1, 6))
+    
+    for pkey in probes.keys():
+        if pkey in ["wk0", "wk1", "wo1", "ff"]:
+            axes[0].plot(range(1, config.num_epochs + 1), probes[pkey], 
+                         linestyle='-', label=f'{pkey}')
+            if log:
+                axes[0].set_xscale('log')
+            
+        elif pkey in ["attn", "ff_icl", "combined_icl"]:
+            axes[1].plot(range(1, config.num_epochs + 1), probes[pkey], 
+                         linestyle='-', label=f'{plot_labels[pkey]}')
+            if log:
+                axes[1].set_xscale('log')
+    
+    axes[0].set_xlabel('Epochs)')
+    if task_name == "bietti":
+        axes[0].set_ylabel('Mempry Recall & KL divergence')
+    else:
+        axes[0].set_ylabel('KL divergence')
     is_mlp = any(config.mlp)
     mlp = "no" if not is_mlp else "with"
     linear = "(linear)" if is_mlp and not any(config.activation) else "" 
-    plt.title(f'{",".join(map(str, config.num_heads))} Heads {config.num_layers} Layers {mlp} MLP {linear} Recall ({config.pos_enc})')
-    plt.legend()
-    plt.grid()
+    axes[0].set_title(f'{",".join(map(str, config.num_heads))} Heads {config.num_layers} Layers {mlp} MLP {linear} Recall ({config.pos_enc})')
+    axes[0].grid()
+    axes[0].legend()
+    if flag:
+        axes[1].set_title(f'ICL Measure')
+        axes[1].legend()
+        axes[1].grid()
+        axes[1].set_xlabel('Epochs')
+        axes[1].set_ylabel('Average TV distance')
     curr_time = datetime.now().strftime("%Y%m%d_%H%M")
     image_path = f"{folder}/probe_s{config.seq_len}p_{config.pos_enc}_l{config.num_layers}h{'_'.join(map(str, config.num_heads))}v{config.vocab_size}{task_name}_{curr_time}.png"
     plt.savefig(image_path)
@@ -106,29 +137,36 @@ def plot_probes(train_results, config, folder="loss_plots", show=False, log=True
     plt.close()
 
 
-def plot_bigram_icl_risk(config, train_results, folder="loss_plots", show=False, log=True):
+def plot_bigram_icl_risk(config, train_results, folder="loss_plots", show=False):
 
     if len(train_results["bigram_losses"]) == 0:
         return 
 
+    bigram_losses, icl_losses = train_results["bigram_losses"], train_results["icl_losses"]
+    bigram_losses_smoothed = moving_average(bigram_losses)
+    icl_losses_smoothed = moving_average(icl_losses)
+    
     task_name = config.task_name
-    plt.figure(figsize=(8, 6))
-    plt.plot(range(1, config.num_epochs + 1), train_results["bigram_losses"], 
-            linestyle='-', label='Bigram Risk')
-    plt.plot(range(1, config.num_epochs + 1), train_results["icl_losses"], 
-             linestyle='--', label='ICL Risk')
-    if log:
-        plt.xscale('log')
-    plt.xlabel('Epochs')
-    plt.ylabel('Loss')
+    fig, axes = plt.subplots(1, 2, figsize=(6*2, 6))
+    range_vec = range(1, config.num_epochs + 1)
+    axes[0].plot(range_vec[:len(bigram_losses_smoothed)], bigram_losses_smoothed, linestyle='-', label='Bigram Risk')
+    axes[1].plot(range_vec[:len(bigram_losses_smoothed)], bigram_losses_smoothed, linestyle='-', label='Bigram Risk')
+    axes[0].plot(range_vec[:len(icl_losses_smoothed)], icl_losses_smoothed, linestyle='--', label='ICL Risk')
+    axes[1].plot(range_vec[:len(icl_losses_smoothed)], icl_losses_smoothed, linestyle='--', label='ICL Risk')
+    axes[1].set_xscale('log')
+    axes[0].set_xlabel('Epochs')
+    axes[1].set_xlabel('Epochs')
+    axes[0].set_ylabel('Loss')
+    axes[1].set_ylabel('Loss')
     mlp = "no" if config.mlp == False else "with"
     linear = "(linear)" if config.activation == False else "" 
-    plt.title(f'{task_name}: {config.num_heads} Heads {config.num_layers} Layers {mlp} MLP {linear} Loss Over Epochs ({config.pos_enc})')
-    plt.legend()
-    plt.grid()
+    axes[0].set_title(f'{task_name}: {config.num_heads} Heads {config.num_layers} Layers {mlp} MLP {linear} Loss Over Epochs ({config.pos_enc})')
+    axes[0].legend()
+    axes[0].grid()
+    axes[1].legend()
+    axes[1].grid()
     curr_time = datetime.now().strftime("%Y%m%d_%H%M")
-    log_scale = "log" if log else ""
-    image_path = f"{folder}/icl_s{config.seq_len}p_{config.pos_enc}_l{config.num_layers}h{'_'.join(map(str, config.num_heads))}v{config.vocab_size}_{log_scale}_{task_name}_{curr_time}.png"
+    image_path = f"{folder}/icl_s{config.seq_len}p_{config.pos_enc}_l{config.num_layers}h{'_'.join(map(str, config.num_heads))}v{config.vocab_size}_{task_name}_{curr_time}.png"
     plt.savefig(image_path)
     if show:
         plt.show()
@@ -160,7 +198,7 @@ def remove_readonly(func, path, exc_info):
     func(path)  # Retry removal
 
 
-def get_attn_gif(layer, head, train_results, config, dag=None, folder="attns", out_folder="attns_plot", show=False, log=True, verbose=False):
+def get_attn_gif(layer, head, train_results, config, dag=None, folder="attns", out_folder="attns_plot", show=False, verbose=False):
     task_name = config.task_name
     attn_maps = train_results["attn_maps"]
     image_paths = []

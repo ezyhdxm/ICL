@@ -180,14 +180,12 @@ def train_model_with_plot(model, config, sampler_config, show=False):
     
     folder = f"loss_plots/{run_time}"
 
-    get_loss_plots(config, train_results, folder=folder, show=show, log=False)
-    get_loss_plots(config, train_results, folder=folder, show=show, log=True)
+    get_loss_plots(config, train_results, folder=folder, show=show)
 
     plot_probes(train_results, config, folder=folder, show=True, log=False)
     plot_probes(train_results, config, folder=folder, show=True, log=True)
 
-    plot_bigram_icl_risk(config, train_results, folder=folder, show=True, log=False)
-    plot_bigram_icl_risk(config, train_results, folder=folder, show=True, log=True)
+    plot_bigram_icl_risk(config, train_results, folder=folder, show=True)
 
     gif_paths = defaultdict(list)
     counts = 0
