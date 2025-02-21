@@ -14,7 +14,7 @@ from tqdm.notebook import tqdm
 from scipy.interpolate import make_interp_spline
 from IPython.display import display, HTML
 
-def moving_average(y, window_size=3):
+def moving_average(y, window_size=5):
     return np.convolve(y, np.ones(window_size)/window_size, mode='valid')
 
 def get_loss_plots(config, train_results, folder="loss_plots", show=False, verbose=False):
@@ -90,7 +90,7 @@ def plot_probes(train_results, config, folder="loss_plots", show=False, log=True
     
     flag = "attn" in probes.keys()
     
-    plot_labels = {"attn": "attn", "ff_icl": "ff", "combined_icl": "ff+attn"}
+    plot_labels = {"attn": "attn", "ff_icl": "ff_icl", "combined_icl": "ff+attn", "ff_mem_unif": "ff_unif", "ff_mem_true": "ff_true"}
     
     task_name = config.task_name
     if flag:
@@ -106,7 +106,7 @@ def plot_probes(train_results, config, folder="loss_plots", show=False, log=True
             if log:
                 axes[0].set_xscale('log')
             
-        elif pkey in ["attn", "ff_icl", "combined_icl"]:
+        elif pkey in ["attn", "ff_icl", "combined_icl", "ff_mem_unif", "ff_mem_true"]:
             axes[1].plot(range(1, config.num_epochs + 1), probes[pkey], 
                          linestyle='-', label=f'{plot_labels[pkey]}')
             if log:

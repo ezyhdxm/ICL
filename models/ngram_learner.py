@@ -80,8 +80,6 @@ class ngramLearner:
         return loss
 
 
-
-
 class many_ngramLearners:
     def __init__(self, sampler_config, order, sampler):
         self.order = order

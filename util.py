@@ -101,24 +101,37 @@ def TV_dist(targets, probs):
 
 def ff_icl_probe(num_tokens, model, device='cpu'):
     OV_2 = model.layers[1].MHA.value.weight.T @ model.layers[1].MHA.out.weight.T
-    tok = torch.tensor([token for token in range(num_tokens)])
-    tok = model.embed(tok)
+    range_toks = torch.arange(num_tokens).to(device)
+    tok = model.embed(range_toks)
     targets = torch.eye(num_tokens).to(device)
     probs = nn.Softmax(dim=-1)(model.output_layer(model.layers[1].mlp(tok @ OV_2)))
     return TV_dist(targets, probs)
 
+def ff_memory_probe(num_tokens, model, trans_mat, device='cpu', weight="true"):
+    # OV_1 = model.layers[0].MHA.value.weight.T @ model.layers[0].MHA.out.weight.T
+    OV_2 = model.layers[1].MHA.value.weight.T @ model.layers[1].MHA.out.weight.T
+    range_toks = torch.arange(num_tokens).to(device)
+    toks = model.embed(range_toks) # (N, D)
+    if weight == "uniform":
+        avg_toks = toks.mean(0).unsqueeze(0) # uniform weights
+    else:
+        avg_toks = trans_mat[range_toks] @ toks # weighted by trans_mat, (N, N) @ (N, D) -> (N, D)
+    mlp_out = model.layers[1].mlp(toks + avg_toks @ OV_2)
+    probs = nn.Softmax(dim=-1)(model.output_layer(toks + avg_toks @ OV_2 + mlp_out))
+    return F.kl_div(trans_mat[range_toks].log(), probs, reduction='batchmean').item()
+
 def attn_icl_probe(num_tokens, model, device='cpu'):
     OV_2 = model.layers[1].MHA.value.weight.T @ model.layers[1].MHA.out.weight.T
-    tok = torch.tensor([token for token in range(num_tokens)])
-    tok = model.embed(tok)
+    range_toks = torch.arange(num_tokens).to(device)
+    tok = model.embed(range_toks)
     probs = nn.Softmax(dim=-1)(model.output_layer(tok @ OV_2))
     targets = torch.eye(num_tokens).to(device)
     return TV_dist(targets, probs)
 
 def combined_icl_probe(num_tokens, model, device='cpu'):
     OV_2 = model.layers[1].MHA.value.weight.T @ model.layers[1].MHA.out.weight.T
-    tok = torch.tensor([token for token in range(num_tokens)])
-    tok = model.embed(tok)
+    range_toks = torch.arange(num_tokens).to(device)
+    tok = model.embed(range_toks)
     probs = nn.Softmax(dim=-1)(model.output_layer(tok @ OV_2 + model.layers[1].mlp(tok @ OV_2)))
     targets = torch.eye(num_tokens).to(device)
     return TV_dist(targets, probs)

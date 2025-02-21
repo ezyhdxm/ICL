@@ -12,7 +12,7 @@ class BaseConfig:
     # Training
     batch_size: int = 256
     num_epochs: int = 1000
-    test_size: int = 1024
+    test_size: int = 4096
     task_name: str = "icl-mc"
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
 

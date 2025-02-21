@@ -168,7 +168,7 @@ def train_model(model, config, sampler_config, run_time=None):
 
 def train_model_with_plot(model, config, sampler_config, show=False):
     run_time = datetime.now().strftime("%Y%m%d_%H%M")
-    os.makedirs(f"loss_plots/{run_time}", exist_ok=True)
+    os.makedirs(f"loss_plots/{config.task_name}/{run_time}", exist_ok=True)
 
     train_results = train_model(model, config, sampler_config, run_time=run_time)
 
@@ -178,7 +178,7 @@ def train_model_with_plot(model, config, sampler_config, show=False):
     with open(result_file_name, "wb") as file:
         pickle.dump(train_results, file)
     
-    folder = f"loss_plots/{run_time}"
+    folder = f"loss_plots/{config.task_name}/{run_time}"
 
     get_loss_plots(config, train_results, folder=folder, show=show)
 
@@ -189,7 +189,7 @@ def train_model_with_plot(model, config, sampler_config, show=False):
 
     gif_paths = defaultdict(list)
     counts = 0
-    attn_folder = f"attns_plot/{run_time}"
+    attn_folder = f"attns_plot/{config.task_name}/{run_time}"
     os.makedirs(attn_folder, exist_ok=True)
 
     for layer in range(config.num_layers):

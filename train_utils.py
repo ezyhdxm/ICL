@@ -39,6 +39,8 @@ def bietti_bb_handler(model, batch, outputs, out_mask, criterion, bigram_losses,
         probes['out'].append(output_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=random_tokens))
         probes['attn'].append(attn_icl_probe(config.vocab_size, model, config.device))
         probes['ff_icl'].append(ff_icl_probe(config.vocab_size, model, config.device))
+        probes['ff_mem_unif'].append(ff_memory_probe(config.vocab_size, model, sampler.trans_mat, config.device, weight="uniform"))
+        probes['ff_mem_true'].append(ff_memory_probe(config.vocab_size, model, sampler.trans_mat, config.device, weight="true"))
         probes['combined_icl'].append(combined_icl_probe(config.vocab_size, model, config.device))
     
     elif config.task_name == "frm":
