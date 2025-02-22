@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 from typing import Tuple
 
+from collections import defaultdict
 
 # config specifies the number of different transitions
 # each time, we randomly sample a transition matrix to use
@@ -55,7 +56,8 @@ class LatentMarkov:
     
     def test(self):
         num_samples = 1
-        latent = torch.randint(high=self.total_trans, size=(num_samples,), device=self.device)
+        latent = torch.randint(high=self.total_trans, size=(num_samples,), device=self.device).item()
+        print("Latent variable: ", latent)
         # Initialize the samples tensor
         samples = torch.zeros((num_samples, self.seq_len), dtype=torch.long, device=self.device)
         
@@ -65,7 +67,7 @@ class LatentMarkov:
             
         for t in range(self.order, self.seq_len):
             state_indices = torch.sum(state*self.powers, dim=1)
-            probs = self.trans_matrix[self.latent][state_indices]  # Shape: (num_samples, num_states)
+            probs = self.trans_matrix[latent][state_indices]  # Shape: (num_samples, num_states)
             
             # Sample the next states for the entire batch
             next_states = torch.multinomial(probs, num_samples=1).squeeze(1)
@@ -79,3 +81,31 @@ class LatentMarkov:
             state[:, -1] = next_states    # Append new state
             
         return samples, probs
+    
+    
+    def summary(self):
+        unigram_stats = defaultdict(torch.Tensor)
+        num_samples = 1000
+        for i in range(self.total_trans):
+            samples = torch.zeros((num_samples, self.seq_len), dtype=torch.long, device=self.device)
+            state = torch.randint(high=self.num_states, size=(num_samples, self.order), device=self.device)
+            samples[:, :self.order] = state
+            
+            for t in range(self.order, self.seq_len):
+                state_indices = torch.sum(state*self.powers, dim=1)
+                probs = self.trans_matrix[i][state_indices]  # Shape: (num_samples, num_states)
+                
+                # Sample the next states for the entire batch
+                next_states = torch.multinomial(probs, num_samples=1).squeeze(1)
+                
+                # Update the sequence with the sampled next states
+                samples[:, t] = next_states
+                
+                # Update the state window (shift left and append the new state)
+                # state = torch.cat([state[:, 1:], next_states.unsqueeze(1)], dim=1)
+                state[:, :-1] = state[:, 1:]  # Shift left
+                state[:, -1] = next_states    # Append new state
+            
+            unigram_stats[i] = torch.bincount(samples.flatten(), minlength=self.num_states).float() / num_samples / self.seq_len
+        
+        return unigram_stats
