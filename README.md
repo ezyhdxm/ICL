@@ -4,6 +4,7 @@ To run the current ongoing experiments, see this [notebook](./TriggerMarkov.ipyn
 
 The structure of this repositary is roughly summarized in the following file tree:
 
+```
 ICL/
 ├── checkpoints/          # checkpoints for models
 ├── tasks/
@@ -33,7 +34,7 @@ ICL/
 ├── train_utils.py        # some utilities to get training loss and memory probe statistics. 
 ├── util.py               # implementation of different probes.
 └── README.md
-
+```
 
 
 ## Legacy
