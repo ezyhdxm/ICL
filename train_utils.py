@@ -50,19 +50,6 @@ def bietti_bb_handler(model, batch, outputs, out_mask, criterion, bigram_losses,
         probes['out'].append(output_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=random_tokens))
         probes['outr'].append(output_residual_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=random_tokens))
         
-        
-class SimulatedDataset(Dataset):
-    def __init__(self, sampler, num_samples):
-        self.num_samples = num_samples
-        self.sampler = sampler
-
-    def __len__(self):
-        return self.num_samples
-
-    def __getitem__(self, idx):
-        # Generate sample on-the-fly
-        return self.sampler.generate()
-
 
 def get_sampler(sampler_config):
     task_samplers = {
@@ -102,6 +89,27 @@ def get_bigram_icl_loss(outputs, targets, out_mask, criterion):
 def get_train_result(**kwargs):
     return kwargs
 
+
+
+
+
+
+
+
+
+
+# Not in use      
+class SimulatedDataset(Dataset):
+    def __init__(self, sampler, num_samples):
+        self.num_samples = num_samples
+        self.sampler = sampler
+
+    def __len__(self):
+        return self.num_samples
+
+    def __getitem__(self, idx):
+        # Generate sample on-the-fly
+        return self.sampler.generate()
 
 def save_model(model, config, train_results):
     os.makedirs("models", exist_ok=True)

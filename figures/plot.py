@@ -17,6 +17,7 @@ from IPython.display import display, HTML
 def moving_average(y, window_size=5):
     return np.convolve(y, np.ones(window_size)/window_size, mode='valid')
 
+
 def get_loss_plots(config, train_results, folder="loss_plots", show=False, verbose=False):
     os.makedirs(folder, exist_ok=True)
     task_name = config.task_name
@@ -83,6 +84,7 @@ def get_loss_plots(config, train_results, folder="loss_plots", show=False, verbo
     plt.close()
     
 
+
 def plot_probes(train_results, config, folder="loss_plots", show=False, log=True):
     probes = train_results["probes"]
     if len(probes) == 0:
@@ -135,6 +137,7 @@ def plot_probes(train_results, config, folder="loss_plots", show=False, log=True
     if show:
         plt.show()
     plt.close()
+
 
 
 def plot_bigram_icl_risk(config, train_results, folder="loss_plots", show=False):

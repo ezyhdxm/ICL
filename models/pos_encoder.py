@@ -5,6 +5,7 @@ import torch.nn.functional as F
 
 # Relative Positional Encoding, https://arxiv.org/pdf/1803.02155
 # Reference: https://github.com/evelinehong/Transformer_Relative_Position_PyTorch
+
 class RelativePositionalEncoding(nn.Module):
     def __init__(self, head_dim, max_seq_len):
         super().__init__()
@@ -19,6 +20,7 @@ class RelativePositionalEncoding(nn.Module):
         return self.pe[distances]
 
 # See https://pytorch.org/torchtune/stable/_modules/torchtune/modules/position_embeddings.html#RotaryPositionalEmbeddings
+# TODO: The following implementation is incorrect.
 class RotaryPositionalEmbeddings(nn.Module):
     def __init__(self, head_dim, max_seq_len, base=10_000):
         super().__init__()

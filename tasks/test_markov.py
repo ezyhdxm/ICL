@@ -24,7 +24,8 @@ class LatentMarkov:
         self.trans_matrix = dirichlet_dist.sample((self.total_trans, self.num_states,))  # Shape: (topics, num_states, num_states)
         self.trans_matrix /= self.trans_matrix.sum(dim=1, keepdim=True)
     
-    def generate(self, epochs=1, mode:str="train")-> torch.Tensor:
+    # generate samples from the model
+    def generate(self, epochs=1, mode:str="train")-> Tuple[torch.Tensor, torch.Tensor]:
         num_samples = self.batch_size if mode == "train" else self.test_size
         num_samples *= epochs
         self.latent = torch.randint(high=self.total_trans, size=(num_samples,), device=self.device)
@@ -54,7 +55,8 @@ class LatentMarkov:
             
         return samples.reshape(epochs, -1, self.seq_len), probs.reshape(epochs, -1, self.num_states)
     
-    def test(self):
+    # generate one sample for manual inspection
+    def test(self)-> Tuple[torch.Tensor, torch.Tensor]:
         num_samples = 1
         latent = torch.randint(high=self.total_trans, size=(num_samples,), device=self.device).item()
         print("Latent variable: ", latent)
@@ -82,8 +84,8 @@ class LatentMarkov:
             
         return samples, probs
     
-    
-    def summary(self):
+    # generate summary statistics of the sampler
+    def summary(self)-> defaultdict:
         unigram_stats = defaultdict(torch.Tensor)
         num_samples = 1000
         for i in range(self.total_trans):

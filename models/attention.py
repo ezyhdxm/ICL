@@ -7,11 +7,20 @@ from models.pos_encoder import *
 
 # TODO: Add MLA, MQA, GQA
 
+# causal mask for flex_attention, not in use yet. 
+# flex_attention is a fast implementation of multihead attention. 
+# Yet it has not support positional encodings with training parameters.  
+
 def causal(b, h, q_idx, kv_idx):
     return q_idx >= kv_idx
 
 
+####################
+# Rotary Embedding #
+####################
+
 # from https://github.com/JiajunSong629/ood-generalization-via-composition/blob/main/synthetic-experiments/model.py#L71
+
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
     """Rotary embedding helper function"""
     freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
@@ -36,6 +45,11 @@ def apply_rotary_emb(xq: torch.Tensor, xk: torch.Tensor, freqs_cis: torch.Tensor
     xq_out = torch.view_as_real(xq_ * freqs_cis).flatten(3)
     xk_out = torch.view_as_real(xk_ * freqs_cis).flatten(3)
     return xq_out.type_as(xq), xk_out.type_as(xk)
+
+
+######################
+# MultiHeadAttention #
+######################
 
 class MultiHeadAttention(nn.Module):
     def __init__(self, config, layer=0):
@@ -74,7 +88,6 @@ class MultiHeadAttention(nn.Module):
                 raise ValueError("Flash Attention with RPE is currently only supported on CUDA devices.") # TODO: pay a closer look to flex_attention
         
         elif self.pos_enc == "rotary":
-            # self.rotary_emb = RotaryPositionalEmbeddings(self.head_dim, config.pos_max_len)
             self.freqs_cis = precompute_freqs_cis(self.head_dim, config.seq_len * 2, # config.rotary_theta,
             ).to(config.device)
         elif self.pos_enc == "alibi":
@@ -87,8 +100,6 @@ class MultiHeadAttention(nn.Module):
         K = self.key(x).view(batch_size, seq_len, self.n_head, self.head_dim).transpose(1,2) # (B,H,T,D)
         V = self.value(x).view(batch_size, seq_len, self.n_head, self.head_dim).transpose(1,2) # (B,H,T,D)
         if self.pos_enc == "rotary":
-            # Q = self.rotary_emb(Q)
-            # K = self.rotary_emb(K)
             T = Q.size(2)
             # expected shape for apply_rotary_emb: (batch_size, max_seq_len, num_head, d_head)
             Q, K = apply_rotary_emb(Q.transpose(1, 2), K.transpose(1, 2), freqs_cis=self.freqs_cis[:T])

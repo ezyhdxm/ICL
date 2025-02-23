@@ -79,7 +79,7 @@ class ngramLearner:
         loss = -torch.sum(one_hot_labels * torch.log(probs+1e-6)) / (batch.size(0) * batch.size(1))
         return loss
 
-
+# n-gram learner for latent markov chain
 class many_ngramLearners:
     def __init__(self, sampler_config, order, sampler):
         self.order = order
@@ -100,7 +100,7 @@ class many_ngramLearners:
 
 
 
-# Empirical n-gram learner with masked random transitions
+# Empirical n-gram learner for handling random triggers
 class mixed_ngramLearner:
     def __init__(self, sampler_config, order, is_icl=True):
         self.order = order

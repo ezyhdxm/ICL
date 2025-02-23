@@ -19,6 +19,7 @@ import pickle
 
 def train_generic(model, config, sampler_config, task_handler=None, run_time=None):
 
+    # Specify the maximum number of epochs to generate in one pass to speedup data generation
     if config.device == "cpu":
         MAX_SIZE = 500 * (32 * 1024 * 1024 // (config.batch_size * config.seq_len) // 500)
     else:
@@ -26,6 +27,7 @@ def train_generic(model, config, sampler_config, task_handler=None, run_time=Non
 
     print("Max size: ", MAX_SIZE)
 
+    # Use for saving results
     if run_time is None:
         run_time = datetime.now().strftime("%Y%m%d_%H%M")
 
@@ -40,6 +42,8 @@ def train_generic(model, config, sampler_config, task_handler=None, run_time=Non
     if sampler_config.task_name in ["frm", "bietti", "bb"]:
         layer = config.mlp.index(True)
         print(f"Layer: {layer}")
+
+
 
     train_losses, eval_losses, eval_steps = [], [], []
     last_token_losses = []
@@ -59,6 +63,8 @@ def train_generic(model, config, sampler_config, task_handler=None, run_time=Non
     test_info = test_info.squeeze(0)
     test_target = test_data[:, 1:].reshape(-1)
     
+    
+    # Collect ngram losses for baseline comparison
     if config.ngram > 0:
         if is_mixed:
             ngramLearnerDict = {i:mixed_ngramLearner(sampler_config, i, is_icl) for i in range(config.ngram)}
@@ -88,7 +94,12 @@ def train_generic(model, config, sampler_config, task_handler=None, run_time=Non
         epochs -= 1
 
     tot_iters = config.num_epochs // epochs
+
     
+    ##################
+    # Start training #
+    ##################
+
     for iters in trange(tot_iters):
         data = sampler.generate(epochs=epochs)
         sample, sample_info = data
@@ -126,6 +137,7 @@ def train_generic(model, config, sampler_config, task_handler=None, run_time=Non
             
             with torch.no_grad():
                 if task_handler:
+                    # collect probes etc.
                     task_handler(model, batch, outputs, batch_info, criterion, bigram_losses, icl_losses, probes, config, sampler, random_tokens, layer)
             
             train_losses.append(loss.item())
@@ -164,6 +176,7 @@ def train_model(model, config, sampler_config, run_time=None):
         "frm": bietti_bb_handler,
     }
     return train_generic(model, config, sampler_config, task_handlers.get(sampler_config.task_name, None), run_time)
+
 
 
 def train_model_with_plot(model, config, sampler_config, show=False):
