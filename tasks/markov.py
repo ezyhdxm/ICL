@@ -187,6 +187,7 @@ class BiettiTask:
         self.seed = config.seed
         self.device = config.device
         self.fixed = config.fixed
+        self.alpha = config.alpha
         if self.fixed:
             self.q_toks = torch.argsort(self.marginal, descending=True)[:self.k]
             print("Fixed triggers: ", self.q_toks)
@@ -345,7 +346,21 @@ class BiettiTask:
         print(f"        Max repetitions among triggers: {max_trigger_count:.2f} ({std_avg_trigger_count:.2f})")
         print("#############################################################################")
         
+    def modified(self, token):
+        old_trans_mat = self.trans_mat.clone()
+        prior = torch.ones(self.num_states, device=self.device) * self.alpha
+        dirichlet_dist = torch.distributions.Dirichlet(prior)
+        self.trans_mat[token] = dirichlet_dist.sample()  # Shape: (vocab_size,)
+        while (self.trans_mat[token] - old_trans_mat[token]).abs().sum() < 0.5:
+            self.trans_mat[token] = dirichlet_dist.sample()
+        print("Modified transition matrix for token: ", self.trans_mat[token])
+        print("Old transition matrix for token: ", old_trans_mat[token])
         
+        batch, _, q_toks = self.generate(epochs=1, mode="test", return_triggers=True)
+        mask = (token == q_toks).sum(dim=-1) # shape: (test_size,)
+        batch = batch[mask==0]
+        self.trans_mat = old_trans_mat
+        return batch
 
 # Bigram Backcopy task: https://arxiv.org/pdf/2410.13835
 # TODO: add attention visualization
