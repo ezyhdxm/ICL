@@ -1,7 +1,11 @@
-.ipynb_checkpoints
-__pycache__
+.ipynb_checkpoints/
+__pycache__/
 .DS_Store
-attns_plot
-train_results
-loss_plots
-attns
+attns_plot/
+attns_plot/**
+checkpoints/
+checkpoints/**
+loss_plots/
+loss_plots/**
+anaconda_projects/
+anaconda_projects/**

@@ -11,7 +11,6 @@ class BaseConfig:
 
     # Training
     batch_size: int = 256
-    num_epochs: int = 1000
     test_size: int = 4096
     task_name: str = "icl-mc"
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -22,6 +21,7 @@ class Config(BaseConfig):
     emb_dim: int = 128
     bias: bool = False
     ff_dim: Optional[int] = None
+    num_epochs: int = 1000
     num_layers: int = 2
     num_heads: Tuple[int] = (1,1)
     dropout: Optional[float] = None

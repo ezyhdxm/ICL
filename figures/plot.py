@@ -213,7 +213,7 @@ def get_attn_gif(layer, head, train_results, config, dag=None, folder="attns", o
     steps = 0
     n_layer, n_heads, n_voc = config.num_layers, config.num_heads[layer], config.vocab_size
     
-    for i, attn in tqdm(attn_maps.items(), mininterval=1, desc="Creating images"):
+    for i, attn in tqdm(attn_maps.items(), mininterval=1, desc="Creating images", leave=False):
         if i < steps:
             continue
         
@@ -318,3 +318,6 @@ def plot_adj_heatmap(adj_mat):
     plt.xticks(rotation=0) 
     plt.title('Matrix Heatmap')
     plt.show()
+
+
+

@@ -23,9 +23,9 @@ def train_generic(model, config, sampler_config, task_handler=None, run_time=Non
     if config.device == "cpu":
         MAX_SIZE = 500 * (32 * 1024 * 1024 // (config.batch_size * config.seq_len) // 500)
     else:
-        MAX_SIZE = 500 * (128 * 1024 * 1024 // (config.batch_size * config.seq_len) // 500)
+        MAX_SIZE = 500 * (64 * 1024 * 1024 // (config.batch_size * config.seq_len) // 500)
 
-    print("Max size: ", MAX_SIZE)
+    # print("Max size: ", MAX_SIZE)
 
     # Use for saving results
     if run_time is None:
@@ -100,7 +100,7 @@ def train_generic(model, config, sampler_config, task_handler=None, run_time=Non
     # Start training #
     ##################
 
-    for iters in trange(tot_iters):
+    for iters in trange(tot_iters, leave=False):
         data = sampler.generate(epochs=epochs)
         sample, sample_info = data
         miniters = epochs // 50
@@ -184,12 +184,6 @@ def train_model_with_plot(model, config, sampler_config, show=False):
     os.makedirs(f"loss_plots/{config.task_name}/{run_time}", exist_ok=True)
 
     train_results = train_model(model, config, sampler_config, run_time=run_time)
-
-    os.makedirs(f"checkpoints/{config.task_name}/{run_time}", exist_ok=True)
-
-    result_file_name = f"checkpoints/{config.task_name}/{run_time}/train_results.pkl"
-    with open(result_file_name, "wb") as file:
-        pickle.dump(train_results, file)
     
     folder = f"loss_plots/{config.task_name}/{run_time}"
 
@@ -232,6 +226,27 @@ def train_model_with_plot(model, config, sampler_config, show=False):
     html_file_name = f"{attn_folder}/attn_view_s{config.seq_len}p_{config.pos_enc}_l{config.num_layers}h{'_'.join(map(str, config.num_heads))}v{config.vocab_size}{config.task_name}_{curr_time}.html"
     with open(html_file_name, "w", encoding="utf-8") as file:
         file.write(html)
+    
+    os.makedirs(f"checkpoints/{config.task_name}/{run_time}", exist_ok=True)
+
+    last_key = sorted(list(train_results["attn_maps"].keys()))[-1]
+    last_attn = train_results["attn_maps"][last_key]
+    last_attn["steps"] = last_key
+    train_results["attn_maps"] = last_attn
+
+    train_results.pop("eval_losses", None)
+    train_results.pop("eval_steps", None)
+    train_results.pop("many_ngram_losses", None)
+    train_results.pop("last_token_losses", None)
+    train_results.pop("bayes_losses", None)
+    train_results.pop("ngramLosses", None)
+    train_results.pop("bigram_losses", None)
+    train_results.pop("icl_losses", None)
+    train_results.pop("probes", None)
+
+    result_file_name = f"checkpoints/{config.task_name}/{run_time}/train_results.pkl"
+    with open(result_file_name, "wb") as file:
+        pickle.dump(train_results, file)
     
     return train_results
     

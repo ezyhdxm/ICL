@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from models.base_models import *
 
 #################
 # Bietti Probes #
@@ -140,7 +141,15 @@ def combined_icl_probe(num_tokens, model, device='cpu'):
 # Get Attention #
 #################
 
-def attention_probe(model, sample):
-    sample = sample.to(model.device)
-    with torch.no_grad():
-        outputs, attn = model(sample)
+
+def get_attn(batch, layer, model, seq_len, device="cpu"):
+    toks = model.embed(batch)
+    freqs_cis = precompute_freqs_cis(16, seq_len * 2).to(device)
+    Q = model.layers[layer].MHA.query(toks).view(1, seq_len, 1, 16)
+    K = model.layers[layer].MHA.key(toks).view(1, seq_len, 1, 16)
+    Q, K = apply_rotary_emb(Q, K, freqs_cis=freqs_cis[:seq_len])
+    Q, K = Q.transpose(1, 2), K.transpose(1, 2)
+    QK = Q @ K.transpose(-1,-2) / model.layers[layer].MHA.scale
+    QK = QK.masked_fill(model.layers[layer].MHA.mask==0, -float("inf"))
+    A = F.softmax(QK, dim=-1)
+    return A
