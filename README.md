@@ -1,6 +1,6 @@
 # Instructions
 
-To run the current ongoing experiments, see this [notebook](./TriggerMarkov.ipynb) for random triggers and this [notebook](./LatentModel.ipynb) for latent markov models.  
+To run the current ongoing experiments, see this [notebook](./TriggerMarkov.ipynb) for random triggers and this [notebook](./LatentModel.ipynb) for latent markov models. To access model checkpoints and saved results, please visit this [link](https://drive.google.com/drive/folders/18P3Q1RQ8pNOZ9mnbFvk27t289jPt8TRP?usp=sharing)
 
 The structure of this repositary is roughly summarized in the following file tree:
 
