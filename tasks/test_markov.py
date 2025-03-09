@@ -60,7 +60,7 @@ class LatentMarkov:
         num_samples = 1
         if latent is None:
             latent = torch.randint(high=self.total_trans, size=(num_samples,), device=self.device).item()
-        print("Latent variable: ", latent)
+            print("Latent variable: ", latent)
         # Initialize the samples tensor
         samples = torch.zeros((num_samples, self.seq_len), dtype=torch.long, device=self.device)
         
