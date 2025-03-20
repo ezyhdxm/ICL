@@ -69,7 +69,26 @@ def feedforward_probe(num_tokens, model, trans_mat, device='cpu', random_tokens=
         range_toks = range_toks[mask]
     toks = model.embed(range_toks)
     mlp_out = model.layers[layer].mlp(toks)
-    toks += mlp_out
+    toks = model.output_layer(mlp_out)
+    return F.kl_div(trans_mat[range_toks].log(), nn.Softmax(dim=1)(toks), reduction='batchmean').item()
+
+
+def ff_emb_probe(num_tokens, model, trans_mat, device='cpu', random_tokens=None, layer=1):
+    range_toks = torch.arange(num_tokens).to(device)
+    if random_tokens is not None:
+        mask = ~torch.isin(range_toks, random_tokens)
+        range_toks = range_toks[mask]
+    toks = model.embed(range_toks)
+    toks += model.layers[layer].mlp(toks)
+    toks = model.output_layer(toks)
+    return F.kl_div(trans_mat[range_toks].log(), nn.Softmax(dim=1)(toks), reduction='batchmean').item()
+
+def emb_probe(num_tokens, model, trans_mat, device='cpu', random_tokens=None):
+    range_toks = torch.arange(num_tokens).to(device)
+    if random_tokens is not None:
+        mask = ~torch.isin(range_toks, random_tokens)
+        range_toks = range_toks[mask]
+    toks = model.embed(range_toks)
     toks = model.output_layer(toks)
     return F.kl_div(trans_mat[range_toks].log(), nn.Softmax(dim=1)(toks), reduction='batchmean').item()
 

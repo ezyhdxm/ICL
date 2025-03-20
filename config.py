@@ -1,9 +1,10 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import torch
 from typing import Tuple, Optional
+import yaml
 
 @dataclass
-class BaseConfig:
+class Config:
     # Data
     seq_len: int = 32
     vocab_size: int = 5
@@ -14,21 +15,20 @@ class BaseConfig:
     test_size: int = 4096
     task_name: str = "icl-mc"
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
-
-@dataclass
-class Config(BaseConfig):
+    
     # Model
     emb_dim: int = 128
     bias: bool = False
+    mlp_bias: bool = True
     ff_dim: Optional[int] = None
     num_epochs: int = 1000
     num_layers: int = 2
-    num_heads: Tuple[int] = (1,1)
+    num_heads: Tuple[int, ...] = field(default_factory=lambda: (1, 1))
     dropout: Optional[float] = None
     mask: bool = True
-    mlp: Tuple[bool] = (False for _ in range(num_layers))
+    mlp: Tuple[bool, ...] = field(default_factory=lambda: (False, False))
     layer_norm: bool = True
-    activation: Tuple[bool] = (False for _ in range(num_layers))
+    activation: Tuple[bool, ...] = field(default_factory=lambda: (False, False))
 
     # Positional Encoding
     pos_enc: str = "rotary"
@@ -54,31 +54,100 @@ class Config(BaseConfig):
     # N-Gram
     ngram: int = 4
 
+    def update_from_yaml(self, yaml_path):
+        """ Update class attributes from a YAML file """
+        with open(yaml_path, "r") as file:
+            config_dict = yaml.safe_load(file)
+
+        for key, value in config_dict.items():
+            if hasattr(self, key):
+                setattr(self, key, value)
+
 
 @dataclass
-class LatentMarkovSamplerConfig(BaseConfig):
+class LatentMarkovSamplerConfig:
+    # Data
+    seq_len: int = 32
+    vocab_size: int = 5
+    seed: Optional[int] = None
+
+    # Training
+    batch_size: int = 256
+    test_size: int = 4096
+    task_name: str = "icl-mc"
+    device: str = "cuda" if torch.cuda.is_available() else "cpu"
+
     order: int = 1
     alpha: float = 1
     total_trans: int = 2 
 
+    def update_from_yaml(self, yaml_path):
+        """ Update class attributes from a YAML file """
+        with open(yaml_path, "r") as file:
+            config_dict = yaml.safe_load(file)
+
+        for key, value in config_dict.items():
+            if hasattr(self, key):
+                setattr(self, key, value)
+
 @dataclass
-class MarkovSamplerConfig(BaseConfig):
+class MarkovSamplerConfig:
+    # Data
+    seq_len: int = 32
+    vocab_size: int = 5
+    seed: Optional[int] = None
+
+    # Training
+    batch_size: int = 256
+    test_size: int = 4096
+    task_name: str = "icl-mc"
+    device: str = "cuda" if torch.cuda.is_available() else "cpu"
+
     order: int = 1
     alpha: float = 1
     dag: list = None
     rho: float = 0.5
     fixed: bool = False
 
+    def update_from_yaml(self, yaml_path):
+        """ Update class attributes from a YAML file """
+        with open(yaml_path, "r") as file:
+            config_dict = yaml.safe_load(file)
+
+        for key, value in config_dict.items():
+            if hasattr(self, key):
+                setattr(self, key, value)
+
 
 
 @dataclass
-class BiettiSamplerConfig(BaseConfig):
+class BiettiSamplerConfig:
+    # Data
+    seq_len: int = 32
+    vocab_size: int = 5
+    seed: Optional[int] = None
+
+    # Training
+    batch_size: int = 256
+    test_size: int = 4096
+    task_name: str = "icl-mc"
+    device: str = "cuda" if torch.cuda.is_available() else "cpu"
+
     k: int = 2
     marginal: torch.Tensor = None
     trans_mat: torch.Tensor = None
     shakespeare: bool = False
     alpha: float = 1
     fixed: bool = False
+
+    def update_from_yaml(self, yaml_path):
+        """ Update class attributes from a YAML file """
+        with open(yaml_path, "r") as file:
+            config_dict = yaml.safe_load(file)
+
+        for key, value in config_dict.items():
+            if hasattr(self, key):
+                setattr(self, key, value)
 
     def __post_init__(self):
         num_states = self.vocab_size if self.task_name == "bietti" else self.vocab_size - 1

@@ -97,16 +97,17 @@ def plot_probes(train_results, config, folder="loss_plots", show=False, log=True
     task_name = config.task_name
     if flag:
         fig, axes = plt.subplots(1, 2, figsize=(6*2, 6))
+        ax = axes[0]
     
     else:
-        fig, axes = plt.subplots(1, 1, figsize=(6*1, 6))
+        fig, ax = plt.subplots(1, 1, figsize=(6*1, 6))
     
     for pkey in probes.keys():
-        if pkey in ["wk0", "wk1", "wo1", "ff"]:
-            axes[0].plot(range(1, config.num_epochs + 1), probes[pkey], 
-                         linestyle='-', label=f'{pkey}')
+        if pkey in ["wk0", "wk1", "wo1", "ff", "emb", "ff_emb"]:
+            ax.plot(range(1, config.num_epochs + 1), probes[pkey], 
+                        linestyle='-', label=f'{pkey}')
             if log:
-                axes[0].set_xscale('log')
+                ax.set_xscale('log')
             
         elif pkey in ["attn", "ff_icl", "combined_icl", "ff_mem_unif", "ff_mem_true"]:
             axes[1].plot(range(1, config.num_epochs + 1), probes[pkey], 
@@ -114,17 +115,17 @@ def plot_probes(train_results, config, folder="loss_plots", show=False, log=True
             if log:
                 axes[1].set_xscale('log')
     
-    axes[0].set_xlabel('Epochs)')
+    ax.set_xlabel('Epochs)')
     if task_name == "bietti":
-        axes[0].set_ylabel('Mempry Recall & KL divergence')
+        ax.set_ylabel('Mempry Recall & KL divergence')
     else:
-        axes[0].set_ylabel('KL divergence')
+        ax.set_ylabel('KL divergence')
     is_mlp = any(config.mlp)
     mlp = "no" if not is_mlp else "with"
     linear = "(linear)" if is_mlp and not any(config.activation) else "" 
-    axes[0].set_title(f'{",".join(map(str, config.num_heads))} Heads {config.num_layers} Layers {mlp} MLP {linear} Recall ({config.pos_enc})')
-    axes[0].grid()
-    axes[0].legend()
+    ax.set_title(f'{",".join(map(str, config.num_heads))} Heads {config.num_layers} Layers {mlp} MLP {linear} Recall ({config.pos_enc})')
+    ax.grid()
+    ax.legend()
     if flag:
         axes[1].set_title(f'ICL Measure')
         axes[1].legend()

@@ -52,7 +52,7 @@ def train_generic(model, config, sampler_config, task_handler=None, run_time=Non
     bayes_losses = []
     is_causal = sampler_config.task_name in ["dag", "tree"]
     criterion = nn.CrossEntropyLoss() if not is_causal else last_token_loss
-    optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay) #torch.optim.Adam(model.parameters(), lr=config.learning_rate)
     scheduler = CosineAnnealingLR(optimizer, T_max=config.T_max) if config.scheduler is True else None
     
     is_icl = "icl" in sampler_config.task_name

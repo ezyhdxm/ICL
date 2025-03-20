@@ -36,6 +36,8 @@ def bietti_bb_handler(model, batch, outputs, out_mask, criterion, bigram_losses,
             probes['ffr'].append(feedforward_residual_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=None))
         probes['outr'].append(output_residual_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=random_tokens))    
         probes['ff'].append(feedforward_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=random_tokens, layer=layer))
+        probes['emb'].append(emb_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=random_tokens))
+        probes['ff_emb'].append(ff_emb_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=random_tokens, layer=layer))
         probes['out'].append(output_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=random_tokens))
         probes['attn'].append(attn_icl_probe(config.vocab_size, model, config.device))
         probes['ff_icl'].append(ff_icl_probe(config.vocab_size, model, config.device))
@@ -47,6 +49,8 @@ def bietti_bb_handler(model, batch, outputs, out_mask, criterion, bigram_losses,
         if layer == 1:
             probes['ffr'].append(feedforward_residual_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=None))
         probes['ff'].append(feedforward_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=random_tokens, layer=layer))
+        probes['emb'].append(emb_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=random_tokens))
+        probes['ff_emb'].append(ff_emb_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=random_tokens, layer=layer))
         probes['out'].append(output_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=random_tokens))
         probes['outr'].append(output_residual_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=random_tokens))
         

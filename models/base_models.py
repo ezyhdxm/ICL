@@ -28,9 +28,9 @@ class TFBlock(nn.Module):
             if config.activation[layer]:
                 assert config.ff_dim is not None, "FeedForward dimension cannot be empty."
                 self.mlp = nn.Sequential(
-                    nn.Linear(config.emb_dim, config.ff_dim),
+                    nn.Linear(config.emb_dim, config.ff_dim, bias=config.mlp_bias),
                     nn.ReLU(),
-                    nn.Linear(config.ff_dim, config.emb_dim)
+                    nn.Linear(config.ff_dim, config.emb_dim, bias=config.mlp_bias)
                 )
             else:
                 self.mlp = nn.Linear(config.emb_dim, config.emb_dim)

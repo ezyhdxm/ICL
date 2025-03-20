@@ -205,7 +205,7 @@ class BiettiTask:
             q_toks = self.q_toks.unsqueeze(0).repeat(num_samples, 1)
         trans_probs = torch.ones((num_samples*self.k, self.num_states)).to(self.device)  # Shape: (num_samples * k, num_states)
         trans_probs[torch.arange(num_samples*self.k), q_toks.reshape(-1)] = 0 # Avoid repeating the same token
-        trans_probs /= trans_probs.sum(dim=-1, keepdim=True)
+        trans_probs /= trans_probs.sum(dim=-1, keepdim=True) # Uniform output tokens. 
         o_toks = torch.multinomial(trans_probs, num_samples=1).reshape(num_samples, self.k)
         
         samples = torch.zeros((num_samples, self.seq_len), dtype=torch.long, device=self.device)
