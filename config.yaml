@@ -12,10 +12,10 @@ mlp: [False, False] # whether to use mlp in each layer
 activation: [False, False] # whether to use activation in each layer
 ff_dim: 16 # feed forward layer dimension
 layer_norm: False # whether to use layer normalization
-dropout: 0 # dropout rate
+dropout: null # dropout rate
 
 # data
-seq_len: 128 # sequence length
+seq_len: 256 # sequence length
 vocab_size: 5
 batch_size: 64
 task_name: "bietti" # ["bietti", "bb", "dag", "tree", "icl-mc" "frm"]
@@ -27,7 +27,7 @@ fixed: False
 k: 1 # for bietti
 
 # training
-num_epochs: 20000 # number of training steps
+num_epochs: 30000 # number of training steps
 eval_iter: 1000 # evaluate every ... iterations
 get_attn: 100 # get average attention every ... iteration in the earlier training stage, later training stage will be fixed to 1000
 get_checkpoints: 1200 # get model checkpoint every ... iteration

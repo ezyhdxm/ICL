@@ -52,7 +52,7 @@ class Config:
     T_max: int = 20
     
     # N-Gram
-    ngram: int = 4
+    ngram: int = 2
 
     def update_from_yaml(self, yaml_path):
         """ Update class attributes from a YAML file """
@@ -149,7 +149,6 @@ class BiettiSamplerConfig:
             if hasattr(self, key):
                 setattr(self, key, value)
 
-    def __post_init__(self):
         num_states = self.vocab_size if self.task_name == "bietti" else self.vocab_size - 1
         if not self.shakespeare:
             prior = torch.ones(num_states, device=self.device) * self.alpha
