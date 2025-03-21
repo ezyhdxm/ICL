@@ -40,7 +40,9 @@ def train_generic(model, config, sampler_config, task_handler=None, run_time=Non
             random_tokens = sampler.q_toks
     
     if sampler_config.task_name in ["frm", "bietti", "bb"]:
-        layer = config.mlp.index(True)
+        layer = None
+        if True in config.mlp:
+            layer = config.mlp.index(True)
         print(f"Layer: {layer}")
 
 

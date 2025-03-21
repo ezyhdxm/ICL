@@ -22,7 +22,7 @@ class TFBlock(nn.Module):
         self.MHA = MultiHeadAttention(config, layer)
         self.ln1 = nn.LayerNorm(config.emb_dim) if config.layer_norm else nn.Identity()
         self.mlp = None
-        self.dropout = nn.Dropout(config.dropout) if config.dropout else None
+        self.attn_dropout = nn.Dropout(config.dropout) if config.dropout else None
 
         if config.mlp[layer]:
             if config.activation[layer]:
@@ -35,15 +35,16 @@ class TFBlock(nn.Module):
             else:
                 self.mlp = nn.Linear(config.emb_dim, config.emb_dim)
             self.ln2 = nn.LayerNorm(config.emb_dim) if config.layer_norm else nn.Identity()
+            self.mlp_dropout = nn.Dropout(config.dropout) if config.dropout else None
 
     def forward(self, x, get_attn=False):
         x = self.ln1(x)
         attn_map = -1
         atten_out, attn_map = self.MHA(x, get_attn)
-        x = x + self.dropout(atten_out) if self.dropout is not None else x + atten_out
+        x = x + self.attn_dropout(atten_out) if self.attn_dropout is not None else x + atten_out
         if self.mlp is not None:
             mlp_out = self.mlp(self.ln2(x))
-            x = x + self.dropout(mlp_out) if self.dropout is not None else x + mlp_out
+            x = x + self.mlp_dropout(mlp_out) if self.mlp_dropout is not None else x + mlp_out
         return x, attn_map 
         
 class Transformer(nn.Module):
