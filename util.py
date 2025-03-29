@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from models.base_models import *
+from itertools import product
+import pandas as pd
 
 #################
 # Bietti Probes #
@@ -38,6 +40,40 @@ def memory_recall_probe(num_tokens, model, to_probe, pos_enc, seq_len=None, devi
             k = model.layers[0].MHA.key(pe[:-1,:]) # (T-1, D)
             q = model.layers[0].MHA.query(pe[1:,:]) # (T-1, D)
         return ((q@k.t()).argmax(-1)==range_pos_toks[:seq_len-1]).float().mean().item()
+
+
+def high_order_memory_probe(sampler, model):
+    SEQ_LEN, VOC_SIZE, order = sampler.seq_len, sampler.num_states, sampler.order
+    perms = list(product(range(VOC_SIZE), repeat=order))
+    tran_est = np.zeros((len(perms), VOC_SIZE))
+    tran_est_res = np.zeros((len(perms), VOC_SIZE))
+    tran_est_ffn = np.zeros((len(perms), VOC_SIZE))
+    pos = SEQ_LEN - 10
+    batch = sampler.generate(mode="probe")
+    # batch_stride = torch.as_strided(batch, size=(1, SEQ_LEN-order, order), stride=(batch.stride(0), batch.stride(1), batch.stride(1))).squeeze(0)
+    
+    for i, p in enumerate(perms):
+        toks = torch.tensor(p, device=sampler.device)
+        batch_copy = batch.clone()
+        batch_copy[0][pos:pos+order] = toks[:]
+        
+        embs = model.embed(batch_copy)
+        hidden = model.layers[0](embs)[0]
+        out_ffn = model.layers[1].mlp(hidden)
+        out_ffn_prob = nn.Softmax(dim=-1)(model.output_layer(out_ffn))[0][pos+order-1].detach().cpu()
+        out_prob = nn.Softmax(dim=-1)(model.output_layer(hidden))[0][pos+order-1].detach().cpu()
+        out_ffn_res = model.layers[1].mlp(hidden) + hidden
+        out_ffn_res_prob = nn.Softmax(dim=-1)(model.output_layer(out_ffn_res))[0][pos+order-1].detach().cpu()
+        tran_est[i] = out_ffn_res_prob.numpy()
+        tran_est_res[i] = out_prob.numpy()
+        tran_est_ffn[i] = out_ffn_prob.numpy()
+    
+    kl_ffn_res = F.kl_div(sampler.trans_mat.log().cpu(), torch.tensor(tran_est), reduction="none").sum(axis=-1).mean()
+    kl_ffn = F.kl_div(sampler.trans_mat.log().cpu(), torch.tensor(tran_est_ffn), reduction="none").sum(axis=-1).mean()
+    kl_res = F.kl_div(sampler.trans_mat.log().cpu(), torch.tensor(tran_est_res), reduction="none").sum(axis=-1).mean()
+    return kl_ffn_res, kl_ffn, kl_res
+
+
 
 def output_probe(num_tokens, model, trans_mat, device='cpu', random_tokens=None):
     range_toks = torch.arange(num_tokens).to(device)

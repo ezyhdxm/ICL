@@ -137,10 +137,10 @@ def train_generic(model, config, sampler_config, task_handler=None, run_time=Non
                 if is_icl:
                     last_token_losses.append(last_token_loss(last_token, batch_info).item())
             
-            with torch.no_grad():
-                if task_handler:
-                    # collect probes etc.
-                    task_handler(model, batch, outputs, batch_info, criterion, bigram_losses, icl_losses, probes, config, sampler, random_tokens, layer)
+            # with torch.no_grad():
+            #    if task_handler:
+            #        # collect probes etc.
+            #        task_handler(model, batch, outputs, batch_info, criterion, bigram_losses, icl_losses, probes, config, sampler, random_tokens, layer)
             
             train_losses.append(loss.item())
             loss.backward()
@@ -151,7 +151,14 @@ def train_generic(model, config, sampler_config, task_handler=None, run_time=Non
             if config.get_checkpoints > 0 and step % config.get_checkpoints == 0:
                 os.makedirs(f"checkpoints/{config.task_name}/{run_time}", exist_ok=True)
                 torch.save(model.state_dict(), f"checkpoints/{config.task_name}/{run_time}/model_{step}.pt")
-        
+
+
+            if step % config.get_probes == 0:
+                with torch.no_grad():
+                    if task_handler:
+                        # collect probes etc.
+                        task_handler(model, batch, outputs, batch_info, criterion, bigram_losses, icl_losses, probes, config, sampler, random_tokens, layer)
+
             if step % config.eval_iter == 0:
                 with torch.no_grad():
                     model.eval()

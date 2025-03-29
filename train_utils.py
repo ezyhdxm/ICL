@@ -32,17 +32,20 @@ def bietti_bb_handler(model, batch, outputs, out_mask, criterion, bigram_losses,
         probe_keys = ["wk0", "wk1", "wo1"]
         for pkey in probe_keys:
             probes[pkey].append(memory_recall_probe(config.vocab_size, model, pkey, config.pos_enc, config.seq_len, config.device))
-        if layer == 1:
-            probes['ffr'].append(feedforward_residual_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=None))
-        probes['outr'].append(output_residual_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=random_tokens))
+        # if layer == 1:
+        #    probes['ffr'].append(feedforward_residual_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=None))
+        # probes['outr'].append(output_residual_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=random_tokens))
         if layer is not None:    
-            probes['ff'].append(feedforward_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=random_tokens, layer=layer))
-            probes['ff_emb'].append(ff_emb_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=random_tokens, layer=layer))
+            kl_ffn_res, kl_ffn, kl_res = high_order_memory_probe(sampler, model)
+            probes['ff+res'].append(kl_ffn_res)
+            probes['ff'].append(kl_ffn)
+            probes['res'].append(kl_res)
+            # probes['ff_emb'].append(ff_emb_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=random_tokens, layer=layer))
             probes['ff_icl'].append(ff_icl_probe(config.vocab_size, model, config.device))
             probes['ff_mem_unif'].append(ff_memory_probe(config.vocab_size, model, sampler.trans_mat, config.device, weight="uniform"))
             probes['ff_mem_true'].append(ff_memory_probe(config.vocab_size, model, sampler.trans_mat, config.device, weight="true"))
             probes['combined_icl'].append(combined_icl_probe(config.vocab_size, model, config.device))
-        probes['emb'].append(emb_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=random_tokens))
+        # probes['emb'].append(emb_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=random_tokens))
         probes['out'].append(output_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=random_tokens))
         probes['attn'].append(attn_icl_probe(config.vocab_size, model, config.device))
         

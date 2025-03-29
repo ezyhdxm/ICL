@@ -63,8 +63,8 @@ def get_loss_plots(config, train_results, folder="loss_plots", show=False, verbo
             axes[0].axhline(y=many_ngram_losses[i], linestyle='-', label=f'{i+1}-gram Loss', color=color, alpha=0.5)
             axes[1].axhline(y=many_ngram_losses[i], linestyle='-', label=f'{i+1}-gram Loss', color=color, alpha=0.5)
     
-    axes[0].set_xlabel('Epochs')
-    axes[1].set_xlabel('Epochs (Log Scale)')
+    axes[0].set_xlabel('Steps')
+    axes[1].set_xlabel('Steps (Log Scale)')
     axes[0].set_ylabel('Loss')
     is_mlp = any(config.mlp)
     mlp = "no" if not is_mlp else "with"
@@ -103,19 +103,19 @@ def plot_probes(train_results, config, folder="loss_plots", show=False, log=True
         fig, ax = plt.subplots(1, 1, figsize=(6*1, 6))
     
     for pkey in probes.keys():
-        if pkey in ["wk0", "wk1", "wo1", "ff", "emb", "ff_emb"]:
-            ax.plot(range(1, config.num_epochs + 1), probes[pkey], 
+        if pkey in ["wk0", "wk1", "wo1", "ff", "emb", "ff_emb", "ff+res", "res"]:
+            ax.plot(range(1, config.num_epochs+1, config.get_probes), probes[pkey], 
                         linestyle='-', label=f'{pkey}')
             if log:
                 ax.set_xscale('log')
             
         elif pkey in ["attn", "ff_icl", "combined_icl", "ff_mem_unif", "ff_mem_true"]:
-            axes[1].plot(range(1, config.num_epochs + 1), probes[pkey], 
+            axes[1].plot(range(1, config.num_epochs+1, config.get_probes), probes[pkey], 
                          linestyle='-', label=f'{plot_labels[pkey]}')
             if log:
                 axes[1].set_xscale('log')
     
-    ax.set_xlabel('Epochs)')
+    ax.set_xlabel('Steps')
     if task_name == "bietti":
         ax.set_ylabel('Mempry Recall & KL divergence')
     else:
@@ -130,7 +130,7 @@ def plot_probes(train_results, config, folder="loss_plots", show=False, log=True
         axes[1].set_title(f'ICL Measure')
         axes[1].legend()
         axes[1].grid()
-        axes[1].set_xlabel('Epochs')
+        axes[1].set_xlabel('Steps')
         axes[1].set_ylabel('Average TV distance')
     curr_time = datetime.now().strftime("%Y%m%d_%H%M")
     image_path = f"{folder}/probe_s{config.seq_len}p_{config.pos_enc}_l{config.num_layers}h{'_'.join(map(str, config.num_heads))}v{config.vocab_size}{task_name}_{curr_time}.png"

@@ -40,6 +40,7 @@ class Config:
     # Training
     learning_rate: float = 3e-4
     eval_iter: int = 50
+    get_probes: int = 200
     get_attn: int = 50
     weight_decay: float = 1e-2
     freeze_value: bool = False
@@ -105,9 +106,13 @@ class MarkovSamplerConfig:
 
     order: int = 1
     alpha: float = 1
+    random_alpha: float = 0.2
+    random_order: int = 1
     dag: list = None
+    k: int = 1
     rho: float = 0.5
     fixed: bool = False
+    q_max: int = 4
 
     def update_from_yaml(self, yaml_path):
         """ Update class attributes from a YAML file """
@@ -130,7 +135,7 @@ class BiettiSamplerConfig:
     # Training
     batch_size: int = 256
     test_size: int = 4096
-    task_name: str = "icl-mc"
+    task_name: str = "bietti"
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
     k: int = 2
@@ -138,6 +143,7 @@ class BiettiSamplerConfig:
     trans_mat: torch.Tensor = None
     shakespeare: bool = False
     alpha: float = 1
+    order: int = 1
     fixed: bool = False
 
     def update_from_yaml(self, yaml_path):

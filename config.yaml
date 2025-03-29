@@ -2,36 +2,41 @@
 
 
 # model
-emb_dim: 16 # embedding dimension
+emb_dim: 128 # embedding dimension
 num_layers: 2 # number of layers
 num_heads: [1,1] # number of heads in each layer
 identity_query: False # whether to fix the query matrix as an identity matrix
 pos_enc: "rotary" # method of position encoding: "abs", "rpe", "rotary", "alibi"; "rotary" is better, since it allows the use of flash attention
-pos_max_len: 128 # maximum length of positional encoding
-mlp: [False, False] # whether to use mlp in each layer
-activation: [False, False] # whether to use activation in each layer
-ff_dim: 16 # feed forward layer dimension
+pos_max_len: 256 # maximum length of positional encoding
+mlp: [False, True] # whether to use mlp in each layer
+activation: [False, True] # whether to use activation in each layer
+ff_dim: 128 # feed forward layer dimension
 layer_norm: False # whether to use layer normalization
 dropout: null # dropout rate
 
 # data
-seq_len: 256 # sequence length
-vocab_size: 5
-batch_size: 64
-task_name: "bietti" # ["bietti", "bb", "dag", "tree", "icl-mc" "frm"]
-order: 1
-alpha: 1
+seq_len: 512 # sequence length
+vocab_size: 30
+q_max: 25
+batch_size: 128
+test_size: 4096
+task_name: "bietti" # ["bietti", "bb", "dag", "tree", "icl-mc" "frm""]
+order: 2
+alpha: 0.1
+random_alpha: 0
+random_order: 1
 total_trans: 3 # for latent markov chain
-rho: 0.2 # for frm
+rho: 0 # for frm
 fixed: False
-k: 1 # for bietti
+k: 5 # for bietti
 
 # training
-num_epochs: 30000 # number of training steps
+num_epochs: 40000 # number of training steps
 eval_iter: 1000 # evaluate every ... iterations
 get_attn: 100 # get average attention every ... iteration in the earlier training stage, later training stage will be fixed to 1000
 get_checkpoints: 1200 # get model checkpoint every ... iteration
 flash: True # Use "rotary" or "abs" to allow 2x-3x speedup
-ngram: 2 # how many grams of baseline to compare to
+ngram: 4 # how many grams of baseline to compare to
 learning_rate: 0.0006
 weight_decay: 0.01
+# device: "cpu"
