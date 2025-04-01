@@ -9,7 +9,7 @@ from itertools import product
 from dataclasses import dataclass
 from collections import namedtuple, defaultdict
 from tasks.markov import *
-from models.ngram_learner import *
+from models.ngram_latent import *
 from models.base_models import *
 from models.pos_encoder import *
 from tasks.causal_graph import *

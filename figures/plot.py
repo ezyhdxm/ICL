@@ -147,19 +147,27 @@ def plot_bigram_icl_risk(config, train_results, folder="loss_plots", show=False)
         return 
 
     bigram_losses, icl_losses = train_results["bigram_losses"], train_results["icl_losses"]
+    ood_losses_smoothed = None
+    if len(train_results["ood_losses"]) > 0:
+        ood_losses = train_results["ood_losses"]
+        ood_losses_smoothed = moving_average(ood_losses)
+
     bigram_losses_smoothed = moving_average(bigram_losses)
     icl_losses_smoothed = moving_average(icl_losses)
     
     task_name = config.task_name
     fig, axes = plt.subplots(1, 2, figsize=(6*2, 6))
-    range_vec = range(1, config.num_epochs + 1)
+    range_vec = range(1, config.num_epochs+1, config.get_probes)
     axes[0].plot(range_vec[:len(bigram_losses_smoothed)], bigram_losses_smoothed, linestyle='-', label='Bigram Risk')
     axes[1].plot(range_vec[:len(bigram_losses_smoothed)], bigram_losses_smoothed, linestyle='-', label='Bigram Risk')
     axes[0].plot(range_vec[:len(icl_losses_smoothed)], icl_losses_smoothed, linestyle='--', label='ICL Risk')
     axes[1].plot(range_vec[:len(icl_losses_smoothed)], icl_losses_smoothed, linestyle='--', label='ICL Risk')
+    if ood_losses_smoothed is not None:
+        axes[0].plot(range_vec[:len(ood_losses_smoothed)], ood_losses_smoothed, linestyle='-', label='OOD Risk')
+        axes[1].plot(range_vec[:len(ood_losses_smoothed)], ood_losses_smoothed, linestyle='-', label='OOD Risk')
     axes[1].set_xscale('log')
-    axes[0].set_xlabel('Epochs')
-    axes[1].set_xlabel('Epochs')
+    axes[0].set_xlabel('Steps')
+    axes[1].set_xlabel('Steps (Log Scale)')
     axes[0].set_ylabel('Loss')
     axes[1].set_ylabel('Loss')
     mlp = "no" if config.mlp == False else "with"

@@ -17,19 +17,9 @@ from figures.head_view import *
 import pickle
 
 
-# Train model based on task
-def train_model(model, config, sampler_config, run_time=None):
-    if sampler_config.task_name in ["frm", "bietti"]:
-        return train_trigger(model, config, sampler_config, run_time)
-    elif sampler_config.task_name in ["icl-mc", "latent"]:
-        return train_latent(model, config, sampler_config, run_time)
-    
-    raise NotImplementedError(f"Task '{sampler_config.task_name}' not implemented yet or is a legacy task. Please choose 'frm', 'bietti', 'icl-mc', or 'latent' for training.")
 
 
-
-
-def train_trigger(model, config, sampler_config, run_time=None):
+def train_generic(model, config, sampler_config, task_handler=None, run_time=None):
 
     # Specify the maximum number of epochs to generate in one pass to speedup data generation
     if config.device == "cpu":
@@ -50,143 +40,12 @@ def train_trigger(model, config, sampler_config, run_time=None):
             random_tokens = sampler.random_rows
         if sampler_config.task_name == "bietti":
             random_tokens = sampler.q_toks
-
-    layer = None
-    if True in config.mlp:
-        layer = config.mlp.index(True)
-    # print(f"Layer: {layer}")
-
-    train_losses, eval_losses, eval_steps = [], [], []
-    last_token_losses = []
-    attn_maps, ngramLosses, bigram_losses, icl_losses, probes = {}, defaultdict(int), [], [], defaultdict(list)
-    ood_losses = []
-    many_ngram_losses = {}
-    bayes_losses = []
     
-    criterion = nn.CrossEntropyLoss() 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay) #torch.optim.Adam(model.parameters(), lr=config.learning_rate)
-    scheduler = CosineAnnealingLR(optimizer, T_max=config.T_max) if config.scheduler is True else None
-    
-    test_data, test_info = sampler.generate(mode="test")
-    test_data = test_data.squeeze(0)
-    test_info = test_info.squeeze(0)
-    test_target = test_data[:, 1:].reshape(-1)
-    
-    if sampler_config.ood:
-        ood_batch, ood_mask = sampler.generate(mode="ood")
-    else:
-        ood_batch, ood_mask = None, None
-    eval_batch, eval_mask = sampler.generate(mode="eval")
-    probe_batch = sampler.generate(mode="probe")
-    
-    # Collect ngram losses for baseline comparison
-    if config.ngram > 0:
-        ngramLearnerDict = {i:mixed_ngramLearner(sampler_config, i) for i in range(config.ngram)}
-
-        for i, learner in ngramLearnerDict.items():
-            learner.update(test_data, test_info)
-            ngram_loss = learner.loss(test_data, test_info)
-            ngramLosses[i] = ngram_loss.item()
-    
-    step, early_steps = 0, 1000
-    epochs = min(config.num_epochs, MAX_SIZE)
-    while (config.num_epochs % epochs != 0) and (epochs > 0):
-        epochs -= 1
-
-    tot_iters = config.num_epochs // epochs
-
-    
-    ##################
-    # Start training #
-    ##################
-
-    for iters in trange(tot_iters, leave=False):
-        data = sampler.generate(epochs=epochs)
-        sample, sample_mask = data
-        miniters = epochs // 50
-        for i in trange(epochs, leave=False, miniters=miniters):
-            step += 1
-            model.train()
-            batch = sample[i]
-            # batch_mask = sample_mask[i]
-            
-            optimizer.zero_grad()
-            targets = batch[:, 1:].reshape(-1)
-
-            get_attn_flag = (step < early_steps) or (step % early_steps == 0)
-
-            if (config.get_attn) > 0 and (step % config.get_attn == 0) and get_attn_flag:
-                outputs, attn = model(batch, get_attn=True)
-                attn_maps[step] = {l: v.clone() for l, v in attn.items()}
-            else:
-                outputs, _ = model(batch)
-            
-            # last_token = outputs[:, -2, :].reshape(-1, config.vocab_size) # (B, V)
-            outputs = outputs[:, :-1, :].reshape(-1, config.vocab_size)
-            loss = criterion(outputs, targets)
-            
-            train_losses.append(loss.item())
-            loss.backward()
-            optimizer.step()
-            if scheduler:
-                scheduler.step()
-            
-            if config.get_checkpoints > 0 and step % config.get_checkpoints == 0:
-                os.makedirs(f"checkpoints/{config.task_name}/{run_time}", exist_ok=True)
-                torch.save(model.state_dict(), f"checkpoints/{config.task_name}/{run_time}/model_{step}.pt")
-
-
-            if step % config.get_probes == 0:
-                with torch.no_grad():
-                    # collect probes etc.
-                    model.eval()
-                    bigram_loss, icl_loss, ood_loss = bietti_bb_handler(model, eval_batch, eval_mask, probes, probe_batch, 
-                                                                        config, sampler, random_tokens, layer, ood_batch, ood_mask)
-                    bigram_losses.append(bigram_loss)
-                    icl_losses.append(icl_loss)
-                    if ood_loss is not None:
-                        ood_losses.append(ood_loss)
-
-            if step % config.eval_iter == 0:
-                with torch.no_grad():
-                    model.eval()
-                    outputs, _ = model(test_data)
-                    outputs = outputs[:, :-1, :].reshape(-1, config.vocab_size)
-                    eval_loss = criterion(outputs, test_target)
-                    eval_losses.append(eval_loss.item())
-                    eval_steps.append(step)
-            
-            
-
-    return get_train_result(train_losses=train_losses, eval_losses=eval_losses, eval_steps=eval_steps,
-                            attn_maps=attn_maps, ngramLosses=ngramLosses, bigram_losses=bigram_losses,
-                            icl_losses=icl_losses, ood_losses=ood_losses, probes=probes, sampler=sampler, 
-                            bayes_losses=bayes_losses, last_token_losses=last_token_losses, 
-                            config=config, sampler_config=sampler_config, many_ngram_losses=many_ngram_losses)
-
-
-
-
-
-
-
-
-def train_latent(model, config, sampler_config, run_time=None):
-
-    # Specify the maximum number of epochs to generate in one pass to speedup data generation
-    if config.device == "cpu":
-        MAX_SIZE = 500 * (32 * 1024 * 1024 // (config.batch_size * config.seq_len) // 500)
-    else:
-        MAX_SIZE = 500 * (64 * 1024 * 1024 // (config.batch_size * config.seq_len) // 500)
-
-    # print("Max size: ", MAX_SIZE)
-
-    # Use for saving results
-    if run_time is None:
-        run_time = datetime.now().strftime("%Y%m%d_%H%M")
-
-    sampler = get_sampler(sampler_config)
-    random_tokens = None
+    if sampler_config.task_name in ["frm", "bietti", "bb"]:
+        layer = None
+        if True in config.mlp:
+            layer = config.mlp.index(True)
+        print(f"Layer: {layer}")
 
 
 
@@ -196,11 +55,13 @@ def train_latent(model, config, sampler_config, run_time=None):
     ood_losses = []
     many_ngram_losses = {}
     bayes_losses = []
-    criterion = nn.CrossEntropyLoss() 
+    is_causal = sampler_config.task_name in ["dag", "tree"]
+    criterion = nn.CrossEntropyLoss() if not is_causal else last_token_loss
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay) #torch.optim.Adam(model.parameters(), lr=config.learning_rate)
     scheduler = CosineAnnealingLR(optimizer, T_max=config.T_max) if config.scheduler is True else None
     
     is_icl = "icl" in sampler_config.task_name
+    is_mixed = sampler_config.task_name in ["bb", "frm", "bietti"]
     
     test_data, test_info = sampler.generate(mode="test")
     test_data = test_data.squeeze(0)
@@ -210,12 +71,19 @@ def train_latent(model, config, sampler_config, run_time=None):
     
     # Collect ngram losses for baseline comparison
     if config.ngram > 0:
-        
-        ngramLearnerDict = {i:ngramLearner(sampler_config, i, is_icl) for i in range(config.ngram)}
+        if is_mixed:
+            ngramLearnerDict = {i:mixed_ngramLearner(sampler_config, i, is_icl) for i in range(config.ngram)}
+
+        else:
+            ngramLearnerDict = {i:ngramLearner(sampler_config, i, is_icl) for i in range(config.ngram)}
 
         for i, learner in ngramLearnerDict.items():
-            learner.update(test_data)
-            ngram_loss = learner.loss(test_data)
+            if not is_mixed:
+                learner.update(test_data)
+                ngram_loss = learner.loss(test_data)
+            else:
+                learner.update(test_data, test_info)
+                ngram_loss = learner.loss(test_data, test_info)
             ngramLosses[i] = ngram_loss.item()
         
         if sampler_config.task_name == "latent":
@@ -258,11 +126,19 @@ def train_latent(model, config, sampler_config, run_time=None):
             else:
                 outputs, _ = model(batch)
             
-            last_token = outputs[:, -2, :].reshape(-1, config.vocab_size) # (B, V)
-            outputs = outputs[:, :-1, :].reshape(-1, config.vocab_size)
-            loss = criterion(outputs, targets)
-            if is_icl:
-                last_token_losses.append(last_token_loss(last_token, batch_info).item())
+            if is_causal:
+                with torch.no_grad():
+                    bayes_prob = sampler.bayes(batch)
+                    bayes_loss = get_bayes_loss(bayes_prob, batch_info)
+                    bayes_losses.append(bayes_loss.item())
+                outputs = outputs[:,-1,:].reshape(-1, config.vocab_size)
+                loss = criterion(outputs, batch_info)
+            else:
+                last_token = outputs[:, -2, :].reshape(-1, config.vocab_size) # (B, V)
+                outputs = outputs[:, :-1, :].reshape(-1, config.vocab_size)
+                loss = criterion(outputs, targets)
+                if is_icl:
+                    last_token_losses.append(last_token_loss(last_token, batch_info).item())
             
             # with torch.no_grad():
             #    if task_handler:
@@ -280,12 +156,19 @@ def train_latent(model, config, sampler_config, run_time=None):
                 torch.save(model.state_dict(), f"checkpoints/{config.task_name}/{run_time}/model_{step}.pt")
 
 
+            if step % config.get_probes == 0:
+                with torch.no_grad():
+                    if task_handler:
+                        # collect probes etc.
+                        model.eval()
+                        task_handler(model, batch, outputs, batch_info, criterion, bigram_losses, icl_losses, probes, config, sampler, random_tokens, layer, ood_losses=ood_losses)
+
             if step % config.eval_iter == 0:
                 with torch.no_grad():
                     model.eval()
                     outputs, _ = model(test_data)
-                    outputs = outputs[:, :-1, :].reshape(-1, config.vocab_size) # if not is_causal else outputs[:,-1,:].reshape(-1, config.vocab_size)
-                    eval_loss = criterion(outputs, test_target) # if not is_causal else criterion(outputs, test_info)
+                    outputs = outputs[:, :-1, :].reshape(-1, config.vocab_size) if not is_causal else outputs[:,-1,:].reshape(-1, config.vocab_size)
+                    eval_loss = criterion(outputs, test_target) if not is_causal else criterion(outputs, test_info)
                     eval_losses.append(eval_loss.item())
                     eval_steps.append(step)
             
@@ -293,14 +176,19 @@ def train_latent(model, config, sampler_config, run_time=None):
 
     return get_train_result(train_losses=train_losses, eval_losses=eval_losses, eval_steps=eval_steps,
                             attn_maps=attn_maps, ngramLosses=ngramLosses, bigram_losses=bigram_losses,
-                            icl_losses=icl_losses, ood_losses=ood_losses, sampler=sampler, 
+                            icl_losses=icl_losses, ood_losses=ood_losses, probes=probes, sampler=sampler, 
                             bayes_losses=bayes_losses, last_token_losses=last_token_losses, 
                             config=config, sampler_config=sampler_config, many_ngram_losses=many_ngram_losses)
 
 
-
-
-
+# Train model based on task
+def train_model(model, config, sampler_config, run_time=None):
+    task_handlers = {
+        "bietti": bietti_bb_handler,
+        "bb": bietti_bb_handler,
+        "frm": bietti_bb_handler,
+    }
+    return train_generic(model, config, sampler_config, task_handlers.get(sampler_config.task_name, None), run_time)
 
 
 
@@ -342,8 +230,7 @@ def train_model_with_plot(model, config, sampler_config, show=False):
                 display(HTML(html_code))
 
     if show:
-        trunc = max(config.seq_len - 64, 0) # show the last 64 tokens
-        get_head_view(model, train_results, config, trunc=trunc, action="view")
+        get_head_view(model, train_results, config, trunc=0, action="view")
     
     
     html = get_head_view(model, train_results, config, trunc=0, action="return")

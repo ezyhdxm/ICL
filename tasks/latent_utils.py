@@ -5,7 +5,7 @@ import os
 import pickle
 import re
 from tqdm import tqdm
-from models.ngram_learner import ngramLearner
+from models.ngram_latent import ngramLearner
 from tasks.markov import *
 from models.base_models import *
 from config import *

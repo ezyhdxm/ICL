@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 import torch
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Any
 import yaml
 
 @dataclass
@@ -12,6 +12,7 @@ class Config:
 
     # Training
     batch_size: int = 256
+    eval_size: int = 1024
     test_size: int = 4096
     task_name: str = "icl-mc"
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -74,6 +75,7 @@ class LatentMarkovSamplerConfig:
 
     # Training
     batch_size: int = 256
+    eval_size: int = 1024
     test_size: int = 4096
     task_name: str = "icl-mc"
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -101,18 +103,23 @@ class MarkovSamplerConfig:
     # Training
     batch_size: int = 256
     test_size: int = 4096
+    eval_size: int = 1024
     task_name: str = "icl-mc"
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
 
     order: int = 1
     alpha: float = 1
+    cardinality: int = 2
     random_alpha: float = 0.2
+    dist_name: str = "dirichlet"
     random_order: int = 1
-    dag: list = None
+    total_trans: int = 2
+    # dag: list = None
     k: int = 1
     rho: float = 0.5
     fixed: bool = False
-    q_max: int = 4
+    o_max: int = 4
+    ood: bool = False
 
     def update_from_yaml(self, yaml_path):
         """ Update class attributes from a YAML file """
@@ -134,6 +141,7 @@ class BiettiSamplerConfig:
 
     # Training
     batch_size: int = 256
+    eval_size: int = 1024
     test_size: int = 4096
     task_name: str = "bietti"
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
@@ -174,3 +182,8 @@ class BiettiSamplerConfig:
             raise NotImplementedError("Shakespeare not implemented yet")
         
     
+
+
+
+
+
