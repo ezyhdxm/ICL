@@ -116,7 +116,7 @@ def train(config: ConfigDict) -> None:
 
     # Logging
     log = _init_log(bsln_preds, config["task"]["n_dims"])
-    # wandb.init(config=config, name=exp_name, **config["wandb"])
+    wandb.init(config=config, name=exp_name, **config["wandb"])
     step = 0
 
     # Training loop
@@ -142,7 +142,7 @@ def train(config: ConfigDict) -> None:
             log["train/step"].append(i)
             lr_val = scheduler.get_last_lr()[0]
             log["train/lr"].append(lr_val)
-            # wandb.log({"train/lr": lr_val}, step=i)
+            wandb.log({"train/lr": lr_val}, step=i)
 
             eval_preds = get_model_preds(
                 model, eval_step, samplers_eval, config["eval"]["n_samples"], config["eval"]["batch_size"]
@@ -153,7 +153,7 @@ def train(config: ConfigDict) -> None:
                     bsln_target_preds = bsln_target_preds.to(config.device)
                     errs = mse(eval_preds[task_name]["Transformer"], bsln_target_preds) / config["task"]["n_dims"]
                     log[f"eval/{task_name}"][f"Transformer | {bsln_name}"].append(errs.tolist())
-                    # wandb.log({f"eval/{task_name}/{bsln_name}": errs.mean().item()}, step=i)
+                    wandb.log({f"eval/{task_name}/{bsln_name}": errs.mean().item()}, step=i)
 
     # Save final checkpoint
     torch.save({

@@ -1,0 +1,1 @@
+{"_runtime":228.8992893,"eval/Pretrain/Ridge":0.18071505427360535,"train/lr":0,"_timestamp":1.7434901071396105e+09,"eval/Latent/True":0.7879343628883362,"eval/Latent/dMMSE":0.3307906985282898,"eval/Pretrain/True":0.1516140252351761,"_wandb":{"runtime":228},"eval/Pretrain/dMMSE":0.02274375408887863,"eval/Latent/Ridge":0.44073325395584106,"_step":20000}

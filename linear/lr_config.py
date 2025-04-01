@@ -26,17 +26,17 @@ def get_config() -> ConfigDict:
     config.model.name = "transformer"
     config.model.n_points = 16
     config.model.n_dims = 8
-    config.model.n_layer = 4
+    config.model.n_layer = 2
     config.model.n_embd = 128
-    config.model.n_head = 2
+    config.model.n_head = 1
     config.model.seed = 100
 
     config.training = ConfigDict()
     config.training.optimizer = "adam"
     config.training.lr = 1e-3
     config.training.schedule = "triangle"
-    config.training.warmup_steps = 10_000
-    config.training.total_steps = 20_000
+    config.training.warmup_steps = 50_000
+    config.training.total_steps = 100_000
 
     config.eval = ConfigDict()
     config.eval.n_samples = 2**14
@@ -47,6 +47,6 @@ def get_config() -> ConfigDict:
     config.eval.every = 1000
 
     config.wandb = ConfigDict()
-    config.wandb.project = ""  # Specify wandb project
+    config.wandb.project = "ICL"  # Specify wandb project
 
     return config

@@ -4,8 +4,6 @@ from typing import Callable, Optional, Dict, List
 from linear.lr_task import Task
 from linear.lr_models import get_model_name
 
-from linear.lr_utils import TrainState
-
 Preds = dict[str, dict[str, torch.Tensor]]
 
 

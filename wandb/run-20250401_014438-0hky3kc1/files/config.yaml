@@ -1,0 +1,77 @@
+_allow_dotted_keys:
+    value: false
+_convert_dict:
+    value: true
+_fields:
+    value:
+        device: cuda
+        dtype: float32
+        eval: |
+            batch_size: 4096
+            data_seed: 104
+            every: 1000
+            n_samples: 16384
+            noise_seed: 106
+            task_seed: 105
+        model: |
+            n_dims: 8
+            n_embd: 128
+            n_head: 2
+            n_layer: 4
+            n_points: 16
+            name: transformer
+            seed: 100
+        task: |
+            batch_size: 256
+            data_scale: 1.0
+            data_seed: 101
+            n_dims: 8
+            n_points: 16
+            n_tasks: 32
+            name: noisy_linear_regression
+            noise_scale: 0.5
+            noise_seed: 103
+            task_scale: 1.0
+            task_seed: 102
+        training: |
+            lr: 0.001
+            optimizer: adam
+            schedule: triangle
+            total_steps: 20000
+            warmup_steps: 10000
+        wandb: |
+            project: ICL
+        work_dir: linear_results
+_locked:
+    value: false
+_sort_keys:
+    value: true
+_type_safe:
+    value: true
+_wandb:
+    value:
+        cli_version: 0.18.7
+        m: []
+        python_version: 3.12.3
+        t:
+            "1":
+                - 1
+                - 55
+            "2":
+                - 1
+                - 55
+            "3":
+                - 2
+                - 13
+                - 16
+                - 23
+                - 55
+                - 61
+            "4": 3.12.3
+            "5": 0.18.7
+            "8":
+                - 1
+                - 3
+                - 5
+            "12": 0.18.7
+            "13": windows-amd64
