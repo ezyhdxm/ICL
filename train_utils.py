@@ -1,7 +1,7 @@
 import torch
 from torch.utils.data import Dataset
 from collections import defaultdict
-from util import *
+from probe_util import *
 from tasks.causal_graph import *
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from tqdm.notebook import tqdm
@@ -10,6 +10,7 @@ from tasks.markov import *
 from tasks.markov_latent import *
 import datetime
 import os
+from torchinfo import summary
 
 
 def get_bayes_loss(bayes_prob, prob):
@@ -27,10 +28,10 @@ def bietti_bb_handler(model, eval_batch, eval_mask, probes, probe_batch, config,
     eval_outputs = eval_outputs[:, :-1, :].reshape(-1, config.vocab_size)
     ood_loss = None
     
-    if config.task_name == "frm":
-        bigram_loss, icl_loss = get_bigram_icl_loss(eval_outputs, eval_batch[:, 1:].reshape(-1), eval_mask)
+    if config.task.name == "frm":
+        id_loss, icl_loss = get_bigram_icl_loss(eval_outputs, eval_batch[:, 1:].reshape(-1), eval_mask)
     else:
-        bigram_loss, icl_loss = get_bigram_icl_error(eval_outputs, eval_batch[:, 1:].reshape(-1), eval_mask)
+        id_loss, icl_loss = get_bigram_icl_error(eval_outputs, eval_batch[:, 1:].reshape(-1), eval_mask)
     
     if (ood_batch is not None) and (ood_mask is not None):
         # Compute the ICL loss for the out-of-distribution samples
@@ -61,7 +62,7 @@ def bietti_bb_handler(model, eval_batch, eval_mask, probes, probe_batch, config,
     probes['out'].append(output_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=random_tokens))
     probes['attn'].append(attn_icl_probe(config.vocab_size, model, config.device))
 
-    return bigram_loss, icl_loss, ood_loss
+    return id_loss, icl_loss, ood_loss
         
     '''
     elif config.task_name == "frm":
@@ -78,20 +79,7 @@ def bietti_bb_handler(model, eval_batch, eval_mask, probes, probe_batch, config,
     
         
 
-def get_sampler(sampler_config):
-    task_samplers = {
-        "markov": MarkovSampler,
-        "bietti": BiettiTask,
-        # "bb": BBTask,
-        "dag": InContextDAGTorch,
-        "tree": InContextTreeTorch,
-        "icl-mc": ICLMarkovSampler,
-        "frm": FRMarkovSampler,
-        "latent": LatentMarkov,
-    }
-    if sampler_config.task_name in task_samplers:
-        return task_samplers[sampler_config.task_name](sampler_config)
-    raise NotImplementedError(f"Task '{sampler_config.task_name}' not implemented yet.")
+
 
 # Compute bigram ICL loss
 def get_bigram_icl_error(outputs, targets, out_mask, burn_in=3):
@@ -151,12 +139,12 @@ class SimulatedDataset(Dataset):
 
 def save_model(model, config, train_results):
     os.makedirs("models", exist_ok=True)
-    model_name = f"{config.task_name}_{config.num_heads}H_{config.num_layers}L"
-    if any(config.mlp):
+    model_name = f"{config.task.name}_{config.model.num_heads}H_{config.model.num_layers}L"
+    if any(config.model.mlp):
         model_name += "_MLP"
-    if any(config.activation):
+    if any(config.model.activation):
         model_name += "_ReLU"
-    model_name += f"_{config.pos_enc}"
+    model_name += f"_{config.model.pos_enc}"
     model_name += f"_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     torch.save({
         'model_state_dict': model.state_dict(),
@@ -164,3 +152,16 @@ def save_model(model, config, train_results):
         'train_results': train_results
     }, f"models/{model_name}.pt")
     print(f"Model saved as {model_name}.pt")
+    
+
+def tabulate_model(model: torch.nn.Module, seq_len: int, batch_size: int, device: str) -> str:
+    dummy_data = torch.ones((batch_size, seq_len), dtype=torch.long, device=device)
+
+    try:
+        info = summary(model, 
+                       input_data=dummy_data, 
+                       depth=3, 
+                       col_names=["input_size", "output_size", "num_params"])
+        return str(info)
+    except Exception as e:
+        return f"Could not tabulate model: {e}"

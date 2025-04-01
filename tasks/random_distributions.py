@@ -7,7 +7,7 @@ class RandomHotDistribution(Distribution):
     def __init__(self, config, validate_args=None):
         super().__init__(batch_shape=torch.Size(), validate_args=validate_args)
         self.num_states = config.vocab_size
-        self.card = config.cardinality
+        self.card = config.task.cardinality
         self.prob = 1.0 / self.card
         assert self.card < self.num_states, "Cardinality must be less than number of states"
 
@@ -56,9 +56,9 @@ class FiniteDirichletDistribution(Distribution):
 
     def __init__(self, config, validate_args=None):
         super().__init__(batch_shape=torch.Size(), validate_args=validate_args)
-        self.alpha = config.random_alpha
+        self.alpha = config.task.random_alpha
         self.num_states = config.vocab_size
-        self.n_tasks = config.total_trans 
+        self.n_tasks = config.task.total_trans 
         if self.n_tasks > 0:
             self.task_pool = torch.distributions.dirichlet.Dirichlet(self.alpha*torch.ones(self.num_states)).sample((self.n_tasks,))
 
@@ -95,6 +95,6 @@ class FiniteDirichletDistribution(Distribution):
 
 
 def get_dist(config) -> Distribution:
-    name = config.dist_name
+    name = config.task.dist_name
     dists = {"finite_dirichlet": FiniteDirichletDistribution, "random_support": RandomHotDistribution}
     return dists[name](config)

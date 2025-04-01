@@ -32,7 +32,7 @@ def get_random_DAG(seq_len, p=0.5):
     return dag
 
 class InContextTreeTorch:
-    def __init__(self, config: MarkovSamplerConfig)->None:
+    def __init__(self, config)->None:
         self.dag = config.dag
         assert np.all(self.dag < np.arange(len(self.dag))), "Invalid DAG structure"
         self.vocab_size = config.vocab_size
@@ -120,7 +120,7 @@ class InContextTreeTorch:
 
 
 class InContextDAGTorch:
-    def __init__(self, config: MarkovSamplerConfig)->None:
+    def __init__(self, config)->None:
         for i, p in enumerate(config.dag):
             assert max(p, default=-1) < i, "Invalid DAG structure"
         self.vocab_size = config.vocab_size

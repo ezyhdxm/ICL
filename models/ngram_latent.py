@@ -7,12 +7,12 @@ from IPython.display import display
 
 # Empirical n-gram learner
 class ngramLearner:
-    def __init__(self, sampler_config, order, is_icl=False):
+    def __init__(self, config, order, is_icl=False):
         self.order = order
-        self.vocab_size = sampler_config.vocab_size
-        self.alpha = sampler_config.alpha
-        self.num_states_order = sampler_config.vocab_size**self.order
-        self.device = sampler_config.device
+        self.vocab_size = config.vocab_size
+        self.alpha = config.task.alpha
+        self.num_states_order = config.vocab_size**self.order
+        self.device = config.device
         self.is_icl = is_icl
         
         if self.order > 0:
@@ -78,22 +78,22 @@ class ngramLearner:
     def loss(self, batch):
         probs = self.predict(batch)
         one_hot_labels = F.one_hot(batch, num_classes=self.vocab_size).float()
-        loss = -torch.sum(one_hot_labels * torch.log(probs+1e-6)) / (batch.size(0) * batch.size(1))
+        loss = -torch.sum(one_hot_labels * torch.log(probs+1e-13)) / (batch.size(0) * batch.size(1))
         return loss
 
 # n-gram learner for latent markov chain
 class many_ngramLearners:
-    def __init__(self, sampler_config, order, sampler):
+    def __init__(self, config, order, sampler):
         self.order = order
         self.sampler = sampler
-        self.markov_sampler = MarkovSampler(sampler_config)
-        self.sampler_config = sampler_config
+        self.markov_sampler = MarkovSampler(config)
+        self.config = config
     
     def loss(self):
         total_trans = self.sampler.trans_matrix.size(0)
         loss = 0
         for i in range(total_trans):
-            ngram_learner = ngramLearner(self.sampler_config, self.order, is_icl=False)
+            ngram_learner = ngramLearner(self.config, self.order, is_icl=False)
             self.markov_sampler.trans_matrix = self.sampler.trans_matrix[i]
             batch = self.markov_sampler.generate(1, mode="test")[0].squeeze()
             ngram_learner.update(batch)

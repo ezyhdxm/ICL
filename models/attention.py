@@ -54,35 +54,35 @@ def apply_rotary_emb(xq: torch.Tensor, xk: torch.Tensor, freqs_cis: torch.Tensor
 class MultiHeadAttention(nn.Module):
     def __init__(self, config, layer=0):
         super().__init__()
-        self.emb_dim = config.emb_dim
-        self.n_head = config.num_heads[layer]
+        self.emb_dim = config.model.emb_dim
+        self.n_head = config.model.num_heads[layer]
         self.head_dim = self.emb_dim // self.n_head
         assert self.emb_dim % self.n_head == 0, "Embedding dimension must be divisible by the number of heads."
-        if config.identity_query:
+        if config.training.identity_query:
             self.query = nn.Identity()
         else:
-            self.query = nn.Linear(self.emb_dim, self.emb_dim, bias=config.bias)
-        self.key = nn.Linear(self.emb_dim, self.emb_dim, bias=config.bias)
-        self.value = nn.Linear(self.emb_dim, self.emb_dim, bias=config.bias)
-        if config.freeze_value:
+            self.query = nn.Linear(self.emb_dim, self.emb_dim, bias=config.model.bias)
+        self.key = nn.Linear(self.emb_dim, self.emb_dim, bias=config.model.bias)
+        self.value = nn.Linear(self.emb_dim, self.emb_dim, bias=config.model.bias)
+        if config.training.freeze_value:
             self.value.weight.requires_grad_(False)
-        self.out = nn.Linear(self.emb_dim, self.emb_dim, bias=config.bias)
-        if config.freeze_out:
+        self.out = nn.Linear(self.emb_dim, self.emb_dim, bias=config.model.bias)
+        if config.training.freeze_out:
             self.out.weight.requires_grad_(False)
         self.mask = torch.tril(torch.ones((config.seq_len, config.seq_len), device=config.device)).unsqueeze(0).unsqueeze(1) # TODO: make self.mask a register_buffer
-        self.get_attn = config.get_attn
-        self.pos_enc = config.pos_enc
+        self.get_attn = config.training.get_attn
+        self.pos_enc = config.model.pos_enc
         self.seq_len = config.seq_len
         self.scale = self.head_dim ** 0.5
-        self.flash = config.flash
-        self.dropout = config.dropout if config.dropout else 0.
+        self.flash = config.model.flash
+        self.dropout = config.model.dropout if config.model.dropout else 0.
         assert not (self.flash and self.pos_enc == "rpe"), "Flash Attention does not support RPE currently."  
         if self.pos_enc == "rpe":
             if not self.flash:
-                self.PEV = RelativePositionalEncoding(self.head_dim, config.pos_max_len) # (T,T,D)
-                self.PEK = RelativePositionalEncoding(self.head_dim, config.pos_max_len) # (T,T,D)
+                self.PEV = RelativePositionalEncoding(self.head_dim, config.model.pos_max_len) # (T,T,D)
+                self.PEK = RelativePositionalEncoding(self.head_dim, config.model.pos_max_len) # (T,T,D)
             elif config.device == "cuda":
-                self.rpe = torch.randn((2*config.pos_max_len+1, self.head_dim), device=config.device) / (self.head_dim ** 0.5)
+                self.rpe = torch.randn((2*config.model.pos_max_len+1, self.head_dim), device=config.device) / (self.head_dim ** 0.5)
                 
             else:
                 raise ValueError("Flash Attention with RPE is currently only supported on CUDA devices.") # TODO: pay a closer look to flex_attention

@@ -14,12 +14,12 @@ class MarkovSampler:
         self.seq_len = config.seq_len
         self.num_states = config.vocab_size
         self.trans = {}
-        self.order = config.order
+        self.order = config.task.order
         self.num_states_order = self.num_states ** self.order
         self.batch_size = config.batch_size
         self.test_size = config.test_size
         self.device = config.device
-        dirichlet_dist = torch.distributions.Dirichlet(torch.ones(self.num_states, device=self.device)*config.alpha)
+        dirichlet_dist = torch.distributions.Dirichlet(torch.ones(self.num_states, device=self.device)*config.task.alpha)
         self.powers = (self.num_states ** torch.arange(self.order - 1, -1, -1, device=self.device)).long()
         # Sample all transition probabilities in one go
         self.trans_matrix = dirichlet_dist.sample((self.num_states_order,))  # Shape: (num_states_order, num_states)
@@ -121,12 +121,12 @@ class ICLMarkovSampler:
     def __init__(self, config):
         self.seq_len = config.seq_len
         self.num_states = config.vocab_size
-        self.order = config.order
+        self.order = config.task.order
         self.num_states_order = self.num_states ** self.order
         self.batch_size = config.batch_size
         self.test_size = config.test_size
         self.device = config.device
-        self.alpha = config.alpha
+        self.alpha = config.task.alpha
         self.powers = (self.num_states ** torch.arange(self.order - 1, -1, -1, device=self.device)).long()
         self.dirichlet_dist = torch.distributions.Dirichlet(torch.ones(self.num_states, device=self.device)*self.alpha)
     
@@ -185,21 +185,21 @@ class FRMarkovSampler:
     def __init__(self, config):
         self.seq_len = config.seq_len
         self.num_states = config.vocab_size
-        self.order = config.order
+        self.order = config.task.order
         self.num_states_order = self.num_states ** self.order
         self.batch_size = config.batch_size
         self.eval_size = config.eval_size
-        self.card = config.cardinality
+        self.card = config.task.cardinality
         self.test_size = config.test_size
         self.device = config.device
-        self.dirichlet_dist = torch.distributions.Dirichlet(torch.ones(self.num_states, device=self.device)*config.alpha)
+        self.dirichlet_dist = torch.distributions.Dirichlet(torch.ones(self.num_states, device=self.device)*config.task.alpha)
         self.random_dist = get_dist(config) #RandomHotDistribution(num_states=self.num_states, card=self.card) # torch.distributions.Dirichlet(torch.ones(self.num_states, device=self.device)*config.random_alpha)
         self.powers = (self.num_states ** torch.arange(self.order - 1, -1, -1, device=self.device)).long()
         # Sample all transition probabilities in one go
         self.trans_mat = self.dirichlet_dist.sample((self.num_states_order,))  # Shape: (num_states_order, num_states)
         self.trans_mat /= self.trans_mat.sum(dim=1, keepdim=True)
-        self.k = int(config.rho * self.num_states) # proportion of rows that have a random transition
-        self.fixed = config.fixed
+        self.k = int(config.task.rho * self.num_states) # proportion of rows that have a random transition
+        self.fixed = config.task.fixed
         if self.fixed:
             self.q_toks = torch.randperm(self.num_states)[:self.k] # pick random rows
             self.q_toks = self.q_toks.to(self.device)
@@ -281,7 +281,7 @@ class FRMarkovSampler:
             self.k = old_k
             return samples
         
-        if mode in ["ood", "eval"]:
+        if mode in ["ood", "eval", "test"]:
             return samples, output_mask
         
         return samples.reshape(epochs, -1, self.seq_len), output_mask.reshape(epochs, -1, self.seq_len)
@@ -295,21 +295,21 @@ class BiettiTask:
         self.seq_len = config.seq_len
         self.num_states = config.vocab_size
         self.device = config.device
-        self.order = config.order
+        self.order = config.task.order
         self.num_states_order = self.num_states ** self.order
-        self.dirichlet_dist = torch.distributions.Dirichlet(torch.ones(self.num_states, device=self.device)*config.alpha)
+        self.dirichlet_dist = torch.distributions.Dirichlet(torch.ones(self.num_states, device=self.device)*config.task.alpha)
         self.trans_mat = self.dirichlet_dist.sample((self.num_states_order,))  # Shape: (num_states_order, num_states)
         self.trans_mat /= self.trans_mat.sum(dim=1, keepdim=True)
         self.batch_size = config.batch_size
         self.eval_size = config.eval_size
         self.test_size = config.test_size
-        self.k = int(config.rho * self.num_states) 
-        self.o_max = config.o_max
+        self.k = int(config.task.rho * self.num_states) 
+        self.o_max = config.task.o_max
         self.seed = config.seed
         
         self.powers = (self.num_states ** torch.arange(self.order - 1, -1, -1, device=self.device)).long()
-        self.fixed = config.fixed
-        self.alpha = config.alpha
+        self.fixed = config.task.fixed
+        self.alpha = config.task.alpha
         if self.fixed:
             self.q_toks = torch.argsort(self.marginal, descending=True)[:self.k]
             print("Fixed triggers: ", self.q_toks)

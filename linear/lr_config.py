@@ -7,7 +7,7 @@ def get_config() -> ConfigDict:
 
     config.dtype = "float32"
     config.device = "cuda" if torch.cuda.is_available() else "cpu"
-    config.work_dir = "linear_results"  # Specify working directory
+    config.work_dir = "results/linear_results"  # Specify working directory
 
     config.task = ConfigDict()
     config.task.name = "noisy_linear_regression"
