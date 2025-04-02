@@ -1,18 +1,18 @@
 {
   "os":  "Windows-11-10.0.26100-SP0",
   "python":  "3.12.3",
-  "startedAt":  "2025-04-01T06:53:44.070526Z",
-  "program":  "Linear.ipynb",
+  "startedAt":  "2025-04-02T09:05:24.279313Z",
+  "program":  "TriggerMarkov.ipynb",
   "git":  {
     "remote":  "https://github.com/ezyhdxm/ICL.git",
-    "commit":  "b20d15b76b716518a15fb5edfecf9285b7e60d59"
+    "commit":  "99daa9b3a83b62494cfa0bd3a431c39e6ce1c12d"
   },
   "email":  "hyan84@wisc.edu",
   "root":  "C:\\Users\\Hao\\Downloads\\LLM\\ICL",
   "host":  "DESKTOP-DQ4LRS3",
   "username":  "Hao",
   "executable":  "C:\\Users\\Hao\\anaconda3\\envs\\LLM\\python.exe",
-  "codePathLocal":  "Linear.ipynb",
+  "codePathLocal":  "TriggerMarkov.ipynb",
   "cpu_count":  16,
   "cpu_count_logical":  22,
   "gpu":  "NVIDIA GeForce RTX 3090 Ti",
@@ -20,7 +20,7 @@
   "disk":  {
     "/":  {
       "total":  "999032877056",
-      "used":  "490162184192"
+      "used":  "483005050880"
     }
   },
   "memory":  {

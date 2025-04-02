@@ -1,4 +1,4 @@
-Start training...
+Starting training...
 Step: 1000
 Step: 2000
 Step: 3000
@@ -59,44 +59,9 @@ Step: 57000
 Step: 58000
 Step: 59000
 Step: 60000
-Step: 61000
-Step: 62000
-Step: 63000
-Step: 64000
-Step: 65000
-Step: 66000
-Step: 67000
-Step: 68000
-Step: 69000
-Step: 70000
-Step: 71000
-Step: 72000
-Step: 73000
-Step: 74000
-Step: 75000
-Step: 76000
-Step: 77000
-Step: 78000
-Step: 79000
-Step: 80000
-Step: 81000
-Step: 82000
-Step: 83000
-Step: 84000
-Step: 85000
-Step: 86000
-Step: 87000
-Step: 88000
-Step: 89000
-Step: 90000
-Step: 91000
-Step: 92000
-Step: 93000
-Step: 94000
-Step: 95000
-Step: 96000
-Step: 97000
-Step: 98000
-Step: 99000
-Step: 100000
 Training complete.
+Loss plots saved at  results\frm\train_6d39ede941d90fc93e2f36e751f78fef\plots
+Probes plots saved at  results\frm\train_6d39ede941d90fc93e2f36e751f78fef\plots
+Probes plots saved at  results\frm\train_6d39ede941d90fc93e2f36e751f78fef\plots
+tensor(0.177)
+tensor(0.259)

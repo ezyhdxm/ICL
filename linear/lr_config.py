@@ -1,5 +1,6 @@
 from ml_collections import ConfigDict
 import torch
+import os
 
 
 def get_config() -> ConfigDict:
@@ -7,7 +8,7 @@ def get_config() -> ConfigDict:
 
     config.dtype = "float32"
     config.device = "cuda" if torch.cuda.is_available() else "cpu"
-    config.work_dir = "results/linear_results"  # Specify working directory
+    config.work_dir = os.path.join("results", "linear")  # Specify working directory
 
     config.task = ConfigDict()
     config.task.name = "noisy_linear_regression"

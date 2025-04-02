@@ -54,22 +54,30 @@ class RandomHotDistribution(Distribution):
 class FiniteDirichletDistribution(Distribution):
     arg_constraints = {}
 
-    def __init__(self, config, validate_args=None):
+    def __init__(self, config, ood=False, validate_args=None):
         super().__init__(batch_shape=torch.Size(), validate_args=validate_args)
         self.alpha = config.task.random_alpha
         self.num_states = config.vocab_size
-        self.n_tasks = config.task.total_trans 
+        if not ood:
+            self.n_tasks = config.task.total_trans 
+        else:
+            self.n_tasks = 0
         if self.n_tasks > 0:
             self.task_pool = torch.distributions.dirichlet.Dirichlet(self.alpha*torch.ones(self.num_states)).sample((self.n_tasks,))
 
-    def sample(self, sample_shape=torch.Size()):
+    def sample(self, sample_shape=torch.Size(), task=None):
         shape = sample_shape if isinstance(sample_shape, torch.Size) else torch.Size(sample_shape)
         total_samples = int(torch.tensor(shape).prod())
 
         # Sample from Dirichlet distribution
+        
         if self.n_tasks > 0:
-            idxs = torch.randint(low=0, high=self.n_tasks, size=(total_samples,))
-            samples = self.task_pool[idxs]
+            if task is None:
+                idxs = torch.randint(low=0, high=self.n_tasks, size=(total_samples,))
+                samples = self.task_pool[idxs]
+            else:
+                assert task < self.n_tasks, "Task index out of bounds"
+                samples = self.task_pool[task].unsqueeze(0).expand(total_samples, -1)
         else:
             samples = torch.distributions.dirichlet.Dirichlet(self.alpha*torch.ones(self.num_states)).sample((total_samples,))
 
@@ -94,7 +102,7 @@ class FiniteDirichletDistribution(Distribution):
     
 
 
-def get_dist(config) -> Distribution:
+def get_dist(config, ood=False) -> Distribution:
     name = config.task.dist_name
     dists = {"finite_dirichlet": FiniteDirichletDistribution, "random_support": RandomHotDistribution}
-    return dists[name](config)
+    return dists[name](config, ood=ood)

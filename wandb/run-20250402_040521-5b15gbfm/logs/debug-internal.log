@@ -1,0 +1,11 @@
+{"time":"2025-04-02T04:05:24.27854-05:00","level":"INFO","msg":"using version","core version":"0.18.7"}
+{"time":"2025-04-02T04:05:24.27854-05:00","level":"INFO","msg":"created symlink","path":"C:\\Users\\Hao\\Downloads\\LLM\\ICL\\wandb\\run-20250402_040521-5b15gbfm\\logs\\debug-core.log"}
+{"time":"2025-04-02T04:05:24.394038-05:00","level":"INFO","msg":"created new stream","id":"5b15gbfm"}
+{"time":"2025-04-02T04:05:24.394038-05:00","level":"INFO","msg":"stream: started","id":"5b15gbfm"}
+{"time":"2025-04-02T04:05:24.394038-05:00","level":"INFO","msg":"sender: started","stream_id":"5b15gbfm"}
+{"time":"2025-04-02T04:05:24.394038-05:00","level":"INFO","msg":"handler: started","stream_id":"5b15gbfm"}
+{"time":"2025-04-02T04:05:24.394038-05:00","level":"INFO","msg":"writer: Do: started","stream_id":"5b15gbfm"}
+{"time":"2025-04-02T04:05:24.7973346-05:00","level":"INFO","msg":"Starting system monitor"}
+{"time":"2025-04-02T04:05:34.7974888-05:00","level":"ERROR","msg":"monitor: disk: error sampling metrics: Incorrect function."}
+{"time":"2025-04-02T08:44:25.2638547-05:00","level":"ERROR","msg":"monitor: memory: error sampling metrics: The parameter is incorrect."}
+{"time":"2025-04-02T08:44:25.2733222-05:00","level":"ERROR","msg":"monitor: cpu: error sampling metrics: could not get CreationDate: The parameter is incorrect.\ncouldn't find pid: 30400"}

@@ -1,8 +1,0 @@
-{"time":"2025-04-01T01:53:44.0699808-05:00","level":"INFO","msg":"using version","core version":"0.18.7"}
-{"time":"2025-04-01T01:53:44.0699808-05:00","level":"INFO","msg":"created symlink","path":"C:\\Users\\Hao\\Downloads\\LLM\\ICL\\wandb\\run-20250401_015341-xwxf8jzp\\logs\\debug-core.log"}
-{"time":"2025-04-01T01:53:44.1822752-05:00","level":"INFO","msg":"created new stream","id":"xwxf8jzp"}
-{"time":"2025-04-01T01:53:44.1822752-05:00","level":"INFO","msg":"stream: started","id":"xwxf8jzp"}
-{"time":"2025-04-01T01:53:44.1822752-05:00","level":"INFO","msg":"handler: started","stream_id":"xwxf8jzp"}
-{"time":"2025-04-01T01:53:44.1822752-05:00","level":"INFO","msg":"sender: started","stream_id":"xwxf8jzp"}
-{"time":"2025-04-01T01:53:44.1822752-05:00","level":"INFO","msg":"writer: Do: started","stream_id":"xwxf8jzp"}
-{"time":"2025-04-01T01:53:44.4831807-05:00","level":"INFO","msg":"Starting system monitor"}

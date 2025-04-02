@@ -1,0 +1,80 @@
+2025-04-02 04:05:21,412 INFO    MainThread:30400 [wandb_setup.py:_flush():79] Current SDK version is 0.18.7
+2025-04-02 04:05:21,412 INFO    MainThread:30400 [wandb_setup.py:_flush():79] Configure stats pid to 30400
+2025-04-02 04:05:21,412 INFO    MainThread:30400 [wandb_setup.py:_flush():79] Loading settings from C:\Users\Hao\.config\wandb\settings
+2025-04-02 04:05:21,412 INFO    MainThread:30400 [wandb_setup.py:_flush():79] Loading settings from C:\Users\Hao\Downloads\LLM\ICL\wandb\settings
+2025-04-02 04:05:21,412 INFO    MainThread:30400 [wandb_setup.py:_flush():79] Loading settings from environment variables: {}
+2025-04-02 04:05:21,412 INFO    MainThread:30400 [wandb_setup.py:_flush():79] Applying setup settings: {'mode': None, '_disable_service': None}
+2025-04-02 04:05:21,414 INFO    MainThread:30400 [wandb_setup.py:_flush():79] Inferring run settings from compute environment: {'program': '<python with no main file>'}
+2025-04-02 04:05:21,414 INFO    MainThread:30400 [wandb_setup.py:_flush():79] Applying login settings: {}
+2025-04-02 04:05:21,414 INFO    MainThread:30400 [wandb_init.py:_log_setup():533] Logging user logs to C:\Users\Hao\Downloads\LLM\ICL\wandb\run-20250402_040521-5b15gbfm\logs\debug.log
+2025-04-02 04:05:21,414 INFO    MainThread:30400 [wandb_init.py:_log_setup():534] Logging internal logs to C:\Users\Hao\Downloads\LLM\ICL\wandb\run-20250402_040521-5b15gbfm\logs\debug-internal.log
+2025-04-02 04:05:21,414 INFO    MainThread:30400 [wandb_init.py:init():619] calling init triggers
+2025-04-02 04:05:21,414 INFO    MainThread:30400 [wandb_init.py:init():626] wandb.init called with sweep_config: {}
+config: {'_fields': {'seq_len': 512, 'vocab_size': 6, 'seed': None, 'batch_size': 128, 'eval_size': 512, 'test_size': 4096, 'device': 'cuda', 'work_dir': 'results\\frm', 'ngram': 4, 'wandb': project: ICL
+, 'task': alpha: 1.0
+cardinality: 2
+dist_name: finite_dirichlet
+fixed: false
+name: frm
+ood: true
+order: 2
+random_alpha: 0.2
+random_order: 1
+rho: 0.2
+total_trans: 256
+, 'model': activation: &id001 !!python/tuple
+- false
+- true
+bias: false
+dropout: null
+emb_dim: 64
+ff_dim: 128
+flash: true
+layer_norm: false
+mask: true
+mlp: *id001
+mlp_bias: true
+num_heads: !!python/tuple
+- 1
+- 1
+num_layers: 2
+pos_enc: rotary
+pos_max_len: 256
+, 'training': T_max: 20
+eval_iter: 1000
+freeze_out: false
+freeze_value: false
+get_attn: 1000
+get_checkpoints: 1000
+get_probes: 100
+identity_query: false
+learning_rate: 0.0003
+num_epochs: 60000
+scheduler: false
+weight_decay: 0.01
+}, '_locked': False, '_type_safe': True, '_convert_dict': True, '_allow_dotted_keys': False, '_sort_keys': True}
+2025-04-02 04:05:21,414 INFO    MainThread:30400 [wandb_init.py:init():644] re-initializing run, found existing run on stack: 444zrw04
+2025-04-02 04:05:21,416 INFO    MainThread:30400 [wandb_run.py:_finish():2155] finishing run hyan84-university-of-wisconsin-madison/ICL/444zrw04
+2025-04-02 04:05:21,417 INFO    MainThread:30400 [jupyter.py:save_history():459] not saving jupyter history
+2025-04-02 04:05:21,417 INFO    MainThread:30400 [jupyter.py:save_ipynb():387] not saving jupyter notebook
+2025-04-02 04:05:21,417 INFO    MainThread:30400 [wandb_init.py:_jupyter_teardown():461] cleaning up jupyter logic
+2025-04-02 04:05:21,417 INFO    MainThread:30400 [wandb_run.py:_atexit_cleanup():2420] got exitcode: 0
+2025-04-02 04:05:21,417 INFO    MainThread:30400 [wandb_run.py:_restore():2402] restore
+2025-04-02 04:05:21,418 INFO    MainThread:30400 [wandb_run.py:_restore():2408] restore done
+2025-04-02 04:05:24,263 INFO    MainThread:30400 [wandb_run.py:_footer_history_summary_info():3960] rendering history
+2025-04-02 04:05:24,263 INFO    MainThread:30400 [wandb_run.py:_footer_history_summary_info():3992] rendering summary
+2025-04-02 04:05:24,272 INFO    MainThread:30400 [wandb_run.py:_footer_sync_info():3921] logging synced files
+2025-04-02 04:05:24,275 INFO    MainThread:30400 [wandb_init.py:init():669] starting backend
+2025-04-02 04:05:24,275 INFO    MainThread:30400 [wandb_init.py:init():673] sending inform_init request
+2025-04-02 04:05:24,277 INFO    MainThread:30400 [backend.py:_multiprocessing_setup():104] multiprocessing start_methods=spawn, using: spawn
+2025-04-02 04:05:24,278 INFO    MainThread:30400 [wandb_init.py:init():686] backend started and connected
+2025-04-02 04:05:24,288 INFO    MainThread:30400 [wandb_run.py:_label_probe_notebook():1339] probe notebook
+2025-04-02 04:05:24,291 INFO    MainThread:30400 [wandb_run.py:_label_probe_notebook():1349] Unable to probe notebook: 'charmap' codec can't decode byte 0x81 in position 5615: character maps to <undefined>
+2025-04-02 04:05:24,291 INFO    MainThread:30400 [wandb_init.py:init():781] updated telemetry
+2025-04-02 04:05:24,319 INFO    MainThread:30400 [wandb_init.py:init():814] communicating run to backend with 90.0 second timeout
+2025-04-02 04:05:24,792 INFO    MainThread:30400 [wandb_init.py:init():867] starting run threads in backend
+2025-04-02 04:05:25,121 INFO    MainThread:30400 [wandb_run.py:_console_start():2456] atexit reg
+2025-04-02 04:05:25,121 INFO    MainThread:30400 [wandb_run.py:_redirect():2305] redirect: wrap_raw
+2025-04-02 04:05:25,121 INFO    MainThread:30400 [wandb_run.py:_redirect():2370] Wrapping output streams.
+2025-04-02 04:05:25,121 INFO    MainThread:30400 [wandb_run.py:_redirect():2395] Redirects installed.
+2025-04-02 04:05:25,121 INFO    MainThread:30400 [wandb_init.py:init():911] run started, returning control to user process

@@ -97,13 +97,13 @@ def get_head_view(model, train_results, config, trunc=30, action='view', batch=N
     _, attn_map = model(batch, get_attn=True)
 
     trunc = trunc
-    attn_tensors = [torch.zeros((1,config.num_heads[l],config.seq_len,config.seq_len)) for l in range(config.num_layers)]
+    attn_tensors = [torch.zeros((1,config.model.num_heads[l],config.seq_len,config.seq_len)) for l in range(config.model.num_layers)]
     for l, attn in attn_map.items():
         attn = attn.unsqueeze(0)  # Number of heads in this layer
-        attn_tensors[l][:1, :config.num_heads[l], :, :] = attn  # Fill attention tensor
+        attn_tensors[l][:1, :config.model.num_heads[l], :, :] = attn  # Fill attention tensor
 
-    trunc_attn = [attn_tensors[l][:1, :config.num_heads[l], trunc:, trunc:] for l in range(config.num_layers)]
-    trunc_attn = [trunc_attn[l]/trunc_attn[l].sum(dim=-1, keepdims=True) for l in range(config.num_layers)]
+    trunc_attn = [attn_tensors[l][:1, :config.model.num_heads[l], trunc:, trunc:] for l in range(config.model.num_layers)]
+    trunc_attn = [trunc_attn[l]/trunc_attn[l].sum(dim=-1, keepdims=True) for l in range(config.model.num_layers)]
     if action == 'view':
         head_view(trunc_attn, batch[0].tolist()[trunc:], html_action=action)
     else:

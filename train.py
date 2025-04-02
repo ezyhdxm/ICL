@@ -5,7 +5,7 @@ from tasks.markov import *
 from models.ngram_latent import *
 from models.ngram_trigger import *
 from collections import defaultdict
-from tasks.causal_graph import *
+# from tasks.causal_graph import *
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from probe_util import *
 from absl import logging
@@ -25,11 +25,11 @@ def get_hash(config: ConfigDict) -> str:
     return hashlib.md5(config.to_json(sort_keys=True).encode("utf-8")).hexdigest()
 
 # Train model based on task
-def train_model(model, config, run_time=None):
+def train_model(model, config):
     if config.task.name in ["frm", "bietti"]:
-        return train_trigger(model, config, run_time)
+        return train_trigger(model, config)
     elif config.task.name in ["icl-mc", "latent"]:
-        return train_latent(model, config, run_time)
+        return train_latent(model, config)
     
     raise NotImplementedError(f"Task '{config.task.name}' not implemented yet or is a legacy task. Please choose 'frm', 'bietti', 'icl-mc', or 'latent' for training.")
 
@@ -55,10 +55,11 @@ def _init_log() -> dict:
     return log
 
 
-def train_trigger(model, config, run_time=None):
+def train_trigger(model, config):
     
     exp_name = f"train_{get_hash(config)}"
     exp_dir = os.path.join(config.work_dir, exp_name)   
+    print("Experiment directory: ", exp_dir) 
     logging.info(f"Train Experiment\nNAME: {exp_name}\nCONFIG:\n{config}")
     
     # Specify the maximum number of epochs to generate in one pass to speedup data generation
@@ -78,13 +79,9 @@ def train_trigger(model, config, run_time=None):
     with open(os.path.join(exp_dir, "config.json"), "w") as f:
         f.write(config.to_json())
     
-    # Use for saving results
-    if run_time is None:
-        run_time = datetime.now().strftime("%Y%m%d_%H%M")
-    
     log = _init_log()
     
-    checkpoint_path = os.path.join(exp_dir, f"checkpoints/{run_time}")
+    checkpoint_path = os.path.join(exp_dir, f"checkpoints")
 
     print(tabulate_model(model, 
                          config.seq_len, config.batch_size, config.device)) 
@@ -195,9 +192,12 @@ def train_trigger(model, config, run_time=None):
                     id_loss, icl_loss, ood_loss = bietti_bb_handler(model, eval_batch, eval_mask, probes, probe_batch, 
                                                                         config, sampler, random_tokens, layer, ood_batch, ood_mask)
                     log["eval/IDLoss"].append(id_loss)
+                    wandb.log({"eval/IDLoss": id_loss}, step=step)
                     log["eval/ICLLoss"].append(icl_loss)
+                    wandb.log({"eval/ICLLoss": icl_loss}, step=step)
                     if ood_loss is not None:
                         log["eval/OODLoss"].append(ood_loss)
+                        wandb.log({"eval/OODLoss": ood_loss}, step=step)
 
             if step % config.training.eval_iter == 0:
                 print(f"Step: {step}")
@@ -219,7 +219,7 @@ def train_trigger(model, config, run_time=None):
         "model": model.state_dict(), 
         "optimizer": optimizer.state_dict(),
         "step": step,
-        }, os.path.join(checkpoint_path, f"model_{step}.pt"))
+        }, os.path.join(checkpoint_path, f"model_final_{step}.pt"))
     with open(log_path, "w") as f:
         json.dump(log, f, indent=2)
 
@@ -235,10 +235,10 @@ def train_trigger(model, config, run_time=None):
 
 
 
-def train_latent(model, config, run_time=None):
+def train_latent(model, config):
 
     exp_name = f"train_{get_hash(config)}"
-    exp_dir = os.path.join(config.work_dir, exp_name)   
+    exp_dir = os.path.join(config.work_dir, exp_name)  
     logging.info(f"Train Experiment\nNAME: {exp_name}\nCONFIG:\n{config}")
     
     # Specify the maximum number of epochs to generate in one pass to speedup data generation
@@ -258,13 +258,9 @@ def train_latent(model, config, run_time=None):
     with open(os.path.join(exp_dir, "config.json"), "w") as f:
         f.write(config.to_json())
     
-    # Use for saving results
-    if run_time is None:
-        run_time = datetime.now().strftime("%Y%m%d_%H%M")
-    
     log = _init_log()
     
-    checkpoint_path = os.path.join(exp_dir, f"checkpoints/{run_time}")
+    checkpoint_path = os.path.join(exp_dir, f"checkpoints")
 
     print(tabulate_model(model, 
                          config.seq_len, config.batch_size, config.device)) 
@@ -380,13 +376,6 @@ def train_latent(model, config, run_time=None):
                     log["eval/loss"].append(eval_loss.item())
                     wandb.log({"eval/loss": eval_loss.item()}, step=step)
                     log["eval/step"].append(step)
-                #with torch.no_grad():
-                #    model.eval()
-                #    outputs, _ = model(test_data)
-                #    outputs = outputs[:, :-1, :].reshape(-1, config.vocab_size) # if not is_causal else outputs[:,-1,:].reshape(-1, config.vocab_size)
-                #    eval_loss = criterion(outputs, test_target) # if not is_causal else criterion(outputs, test_info)
-                #    eval_losses.append(eval_loss.item())
-                #    eval_steps.append(step)
             
             
 
@@ -407,18 +396,15 @@ def train_model_with_plot(model, config, show=False):
         print(f"{exp_name} already completed")
         return
     
-    run_time = datetime.now().strftime("%Y%m%d_%H%M")
 
-    train_results = train_model(model, config, run_time=run_time)
+    train_results = train_model(model, config)
     
     plot_path = os.path.join(exp_dir, "plots")
     os.makedirs(plot_path, exist_ok=True)
 
     get_loss_plots(config, train_results, folder=plot_path, show=show)
-
     plot_probes(train_results, config, folder=plot_path, show=True, log=False)
     plot_probes(train_results, config, folder=plot_path, show=True, log=True)
-
     plot_bigram_icl_risk(config, train_results, folder=plot_path, show=True)
 
     gif_paths = defaultdict(list)
@@ -448,32 +434,20 @@ def train_model_with_plot(model, config, show=False):
     
     
     html = get_head_view(model, train_results, config, trunc=0, action="return")
-    curr_time = datetime.now().strftime("%Y%m%d_%H%M")
     
-    html_file_name = f"{attn_folder}/attn_view.html"
+    html_file_name = os.path.join(attn_folder, "attn_view.html")
     with open(html_file_name, "w", encoding="utf-8") as file:
         file.write(html)
     
-    # os.makedirs(f"checkpoints/{config.task_name}/{run_time}", exist_ok=True)
 
     last_key = sorted(list(train_results["attn_maps"].keys()))[-1]
     last_attn = train_results["attn_maps"][last_key]
     last_attn["steps"] = last_key
     train_results["attn_maps"] = last_attn
 
-    # train_results.pop("eval_losses", None)
-    # train_results.pop("eval_steps", None)
-    # train_results.pop("many_ngram_losses", None)
-    # train_results.pop("last_token_losses", None)
-    # train_results.pop("bayes_losses", None)
-    # train_results.pop("ngramLosses", None)
-    # train_results.pop("bigram_losses", None)
-    # train_results.pop("icl_losses", None)
-    # train_results.pop("probes", None)
-
-    # result_file_name = f"checkpoints/{config.task_name}/{run_time}/train_results.pkl"
-    # with open(result_file_name, "wb") as file:
-    #    pickle.dump(train_results, file)
+    result_file_name = os.path.join(exp_dir, "sampler.pkl")
+    with open(result_file_name, "wb") as file:
+        pickle.dump(train_results["sampler"], file)
     
     return train_results
     

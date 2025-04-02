@@ -20,6 +20,7 @@ def moving_average(y, window_size=5):
 
 def get_loss_plots(config, train_results, folder="loss_plots", show=False, verbose=False):
     os.makedirs(folder, exist_ok=True)
+    print("Loss plots saved at ", folder)
     task_name = config.task.name
     log = train_results["log"]
     train_losses, eval_losses, eval_steps = log["train/loss"], log["eval/loss"], log["eval/step"]
@@ -76,7 +77,7 @@ def get_loss_plots(config, train_results, folder="loss_plots", show=False, verbo
     axes[0].legend()
     axes[1].legend()
     curr_time = datetime.now().strftime("%Y%m%d_%H%M")
-    image_path = f"{folder}/loss_{curr_time}.png"
+    image_path = os.path.join(folder, f"loss_{curr_time}.png")
     plt.savefig(image_path)
     if verbose:
         print("Loss plot saved at ", image_path)
@@ -87,6 +88,7 @@ def get_loss_plots(config, train_results, folder="loss_plots", show=False, verbo
 
 
 def plot_probes(train_results, config, folder="loss_plots", show=False, log=True):
+    print("Probes plots saved at ", folder)
     probes = train_results["probes"]
     if len(probes) == 0:
         return
@@ -134,7 +136,7 @@ def plot_probes(train_results, config, folder="loss_plots", show=False, log=True
         axes[1].set_xlabel('Steps')
         axes[1].set_ylabel('Average TV distance')
     curr_time = datetime.now().strftime("%Y%m%d_%H%M")
-    image_path = f"{folder}/probe_{curr_time}.png"
+    image_path = os.path.join(folder, f"probe_{curr_time}.png")
     plt.savefig(image_path)
     if show:
         plt.show()
@@ -181,7 +183,7 @@ def plot_bigram_icl_risk(config, train_results, folder="loss_plots", show=False)
     axes[1].legend()
     axes[1].grid()
     curr_time = datetime.now().strftime("%Y%m%d_%H%M")
-    image_path = f"{folder}/icl_{curr_time}.png"
+    image_path = os.path.join(folder, f"icl_{curr_time}.png")
     plt.savefig(image_path)
     if show:
         plt.show()
@@ -237,7 +239,7 @@ def get_attn_gif(layer, head, train_results, config, dag=None, folder="attns", o
             steps += max(1000, config.training.get_attn)
 
         if dag is None:
-            if head != "all" or config.num_heads[layer]==1:
+            if head != "all" or config.model.num_heads[layer]==1:
                 head = 0
                 plt.figure(figsize=(6, 6))
                 sns.heatmap(attn[layer][head].cpu(), cmap="viridis", annot=False, cbar=False)
@@ -272,7 +274,7 @@ def get_attn_gif(layer, head, train_results, config, dag=None, folder="attns", o
 
 
         # Save image
-        image_path = f"{folder}/attn_l{n_layer}h{n_heads}v{n_voc}ep{i}_L{layer}H{head}{task_name}.png"
+        image_path = os.path.join(folder, f"attn_l{n_layer}h{n_heads}v{n_voc}ep{i}_L{layer}H{head}{task_name}.png")
         plt.savefig(image_path)
         plt.close()
         image_paths.append(image_path)
@@ -282,7 +284,7 @@ def get_attn_gif(layer, head, train_results, config, dag=None, folder="attns", o
     os.makedirs(out_folder, exist_ok=True)
     # Get current time
     curr_time = datetime.now().strftime("%Y%m%d_%H%M")
-    output_gif_path = f"{out_folder}/attn_{curr_time}.gif"
+    output_gif_path = os.path.join(out_folder, f"attn_l{layer}_h{head}_{curr_time}.gif")
     
     frames[0].save(
         output_gif_path,

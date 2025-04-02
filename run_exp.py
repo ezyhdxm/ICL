@@ -4,7 +4,7 @@ from config import get_config
 from train import train_model_with_plot
 
 
-def run_exp():
+def run_exp(show=True):
     config = get_config()
     # config.update_from_yaml(yaml_path)
     # sampler_config = MarkovSamplerConfig()
@@ -13,6 +13,6 @@ def run_exp():
     model = Transformer(config)
     model = model.to(config.device)
 
-    train_results = train_model_with_plot(model, config, show=True)
+    train_results = train_model_with_plot(model, config, show=show)
 
     return train_results, model

@@ -9,3 +9,5 @@ loss_plots/
 loss_plots/**
 anaconda_projects/
 anaconda_projects/**
+wandb/
+wandb/**

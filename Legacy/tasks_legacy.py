@@ -391,3 +391,131 @@ class FRMarkovSampler:
             state[:, -1] = next_states    # Append new state
         
         return samples, output_mask, self.random_rows, trans_random
+
+class BiettiTask:
+    def __init__(self, config):
+        self.seq_len = config.seq_len
+        self.num_states = config.vocab_size
+        self.device = config.device
+        self.order = config.task.order
+        self.num_states_order = self.num_states ** self.order
+        self.dirichlet_dist = torch.distributions.Dirichlet(torch.ones(self.num_states, device=self.device)*config.task.alpha)
+        self.trans_mat = self.dirichlet_dist.sample((self.num_states_order,))  # Shape: (num_states_order, num_states)
+        self.trans_mat /= self.trans_mat.sum(dim=1, keepdim=True)
+        self.batch_size = config.batch_size
+        self.eval_size = config.eval_size
+        self.test_size = config.test_size
+        self.k = int(config.task.rho * self.num_states) 
+        self.o_max = config.task.o_max
+        self.seed = config.seed
+        
+        self.powers = (self.num_states ** torch.arange(self.order - 1, -1, -1, device=self.device)).long()
+        self.fixed = config.task.fixed
+        self.alpha = config.task.alpha
+        if self.fixed:
+            self.q_toks = torch.argsort(self.marginal, descending=True)[:self.k]
+            print("Fixed triggers: ", self.q_toks)
+    
+    def print_trans_mat(self):
+        perms = list(product(range(self.num_states), repeat=self.order))
+        perms = [''.join(map(str, p)) for p in perms]
+        df = pd.DataFrame(self.trans_mat.cpu(), index=perms, columns=[f"{i}" for i in range(self.num_states)])
+        pd.set_option('display.float_format', '{:.3f}'.format)
+        display(df)
+    
+    def generate(self, mode="train", epochs=1, return_triggers=False, verbose=False):
+        if self.seed is not None:
+            torch.manual_seed(self.seed)
+        
+        testing_flag = False
+        if mode == "train":
+            num_samples = self.batch_size
+        elif mode == "test":
+            num_samples = self.test_size
+        elif mode == "eval":
+            num_samples = self.eval_size
+        elif mode == "probe":
+            old_k = self.k
+            self.k = 0
+            num_samples = self.batch_size
+        elif mode == "ood":
+            num_samples = self.eval_size
+        elif mode == "testing":
+            num_samples = 1
+        else:
+            raise ValueError("Invalid mode. Choose from 'train', 'test', 'eval', 'probe', 'ood', 'testing'")
+        
+        num_samples *= epochs
+        prob_matrix = torch.ones((num_samples, self.num_states)).to(self.device) # self.marginal.unsqueeze(0).repeat(num_samples, 1)
+        prob_matrix[:, self.o_max:] = 0 # Avoid sampling from the last o_max tokens
+        prob_matrix /= prob_matrix.sum(dim=-1, keepdim=True) # Uniform trigger tokens. 
+        # Sample without replacement
+        if self.k > 0:
+            if (not self.fixed):
+                q_toks = torch.multinomial(prob_matrix, self.k, replacement=False)  # Shape: (num_samples, k)
+            else:
+                q_toks = self.q_toks.unsqueeze(0).repeat(num_samples, 1)
+            if verbose:
+                print("triggers: ", q_toks)
+
+            trans_probs = torch.ones((num_samples*self.k, self.num_states)).to(self.device)  # Shape: (num_samples * k, num_states)
+            trans_probs[torch.arange(num_samples*self.k), q_toks.reshape(-1)] = 0 # Avoid repeating the same token
+             
+            if mode != "ood":
+                trans_probs[:, self.o_max:] = 0
+            else:
+                trans_probs[:, :self.o_max] = 0
+
+            trans_probs /= trans_probs.sum(dim=-1, keepdim=True) # Uniform output tokens.
+            o_toks = torch.multinomial(trans_probs, num_samples=1).reshape(num_samples, self.k)
+            if verbose:
+                print("outputs: ", o_toks)
+        
+        samples = torch.zeros((num_samples, self.seq_len), dtype=torch.long, device=self.device)
+        output_mask = torch.zeros((num_samples, self.seq_len), dtype=torch.long, device=self.device)
+
+
+        state = torch.randint(high=self.num_states, size=(num_samples, self.order), device=self.device) # Shape: (num_samples, order)
+        samples[:, :self.order] = state
+        current_tokens = state[:, -1]
+            
+        for t in range(self.order, self.seq_len):
+            state_indices = torch.sum(state * self.powers, dim=1) # shape: (num_samples,)
+            probs = self.trans_mat[state_indices]  # Shape: (num_samples, num_states)
+            next_states = torch.multinomial(probs, num_samples=1).squeeze(1) # shape: (num_samples,)
+
+            if self.k > 0:
+                matches = (q_toks == current_tokens.unsqueeze(1))
+                matched_indices = matches.nonzero(as_tuple=False)
+
+
+                if matched_indices.size(0) > 0:
+                    rows, cols = matched_indices[:, 0], matched_indices[:, 1]  # Batch indices and column indices
+                    next_states[rows] = o_toks[rows, cols]  # Assign corresponding o_toks
+                    output_mask[rows, t-1] = 1  # Update output mask
+            
+            
+            # Update the sequence with the sampled next states
+            samples[:, t] = next_states
+            current_tokens = next_states
+            
+            # Update the state window (shift left and append the new state)
+            state[:, :-1] = state[:, 1:].clone()  # Shift left
+            state[:, -1] = next_states    # Append new state
+        
+        
+        
+        if mode == "testing":
+            return samples, output_mask, q_toks, F.one_hot(o_toks, self.num_states).squeeze(0).float().to(self.device)
+
+        if mode == "probe":
+            self.k = old_k
+            return samples
+        
+        if return_triggers:
+            return samples.reshape(epochs, -1, self.seq_len), output_mask.reshape(epochs, -1, self.seq_len), q_toks.reshape(epochs, -1, self.k)
+
+        if mode in ["ood", "eval"]:
+            return samples, output_mask
+        
+        return samples.reshape(epochs, -1, self.seq_len), output_mask.reshape(epochs, -1, self.seq_len)

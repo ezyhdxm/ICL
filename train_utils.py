@@ -37,7 +37,7 @@ def bietti_bb_handler(model, eval_batch, eval_mask, probes, probe_batch, config,
         # Compute the ICL loss for the out-of-distribution samples
         ood_outputs, _ = model(ood_batch)
         ood_outputs = ood_outputs[:, :-1, :].reshape(-1, config.vocab_size)
-        ood_loss = get_icl_error(ood_outputs, ood_batch[:,1:].reshape(-1), ood_mask)
+        _, ood_loss = get_bigram_icl_loss(ood_outputs, ood_batch[:,1:].reshape(-1), ood_mask)
         
 
     
