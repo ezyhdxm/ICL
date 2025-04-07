@@ -1,10 +1,7 @@
 import torch
 from torch.utils.data import Dataset
-from collections import defaultdict
 from probe_util import *
 from tasks.causal_graph import *
-from torch.optim.lr_scheduler import CosineAnnealingLR
-from tqdm.notebook import tqdm
 from tasks.markov import *
 # from models.ngram_latent import *
 from tasks.markov_latent import *
@@ -23,7 +20,8 @@ def last_token_loss(logits, probs):
 
 
 
-def bietti_bb_handler(model, eval_batch, eval_mask, probes, probe_batch, config, sampler=None, random_tokens=None, layer=1, ood_batch=None, ood_mask=None):
+def trigger_handler(model, eval_batch, eval_mask, probes, probe_batch, config, sampler=None, random_tokens=None, layer=1, 
+                    ood_batch=None, ood_mask=None, copy_batch=None, copy_mask=None):
     eval_outputs, _ = model(eval_batch)
     eval_outputs = eval_outputs[:, :-1, :].reshape(-1, config.vocab_size)
     ood_loss = None
@@ -38,6 +36,12 @@ def bietti_bb_handler(model, eval_batch, eval_mask, probes, probe_batch, config,
         ood_outputs, _ = model(ood_batch)
         ood_outputs = ood_outputs[:, :-1, :].reshape(-1, config.vocab_size)
         _, ood_loss = get_bigram_icl_loss(ood_outputs, ood_batch[:,1:].reshape(-1), ood_mask)
+    
+    if (copy_batch is not None) and (copy_mask is not None):
+        # Compute the ICL loss for the copy samples
+        copy_outputs, _ = model(copy_batch)
+        copy_outputs = copy_outputs[:, :-1, :].reshape(-1, config.vocab_size)
+        _, copy_error = get_bigram_icl_error(copy_outputs, copy_batch[:,1:].reshape(-1), copy_mask)
         
 
     
@@ -62,7 +66,7 @@ def bietti_bb_handler(model, eval_batch, eval_mask, probes, probe_batch, config,
     probes['out'].append(output_probe(config.vocab_size, model, sampler.trans_mat, config.device, random_tokens=random_tokens))
     probes['attn'].append(attn_icl_probe(config.vocab_size, model, config.device))
 
-    return id_loss, icl_loss, ood_loss
+    return id_loss, icl_loss, ood_loss, copy_error
         
     '''
     elif config.task_name == "frm":
@@ -82,20 +86,20 @@ def bietti_bb_handler(model, eval_batch, eval_mask, probes, probe_batch, config,
 
 
 # Compute bigram ICL loss
-def get_bigram_icl_error(outputs, targets, out_mask, burn_in=3):
+def get_bigram_icl_error(outputs, targets, out_mask):
     criterion = nn.CrossEntropyLoss()
     icl_mask_flat = (out_mask==1)[:,:-1].reshape(-1)
-    bigram_loss = criterion(outputs[~icl_mask_flat], targets[~icl_mask_flat])
+    id_loss = criterion(outputs[~icl_mask_flat], targets[~icl_mask_flat])
     preds = torch.argmax(outputs, dim=-1)
-    icl_error = (preds[icl_mask_flat][burn_in:] != targets[icl_mask_flat][burn_in:]).sum()
+    icl_error = (preds[icl_mask_flat] != targets[icl_mask_flat]).sum()
     total = icl_mask_flat.sum()
     icl_loss = icl_error.float() / total.float()
-    return bigram_loss.item(), icl_loss.item()
+    return id_loss.item(), icl_loss.item()
 
-def get_icl_error(outputs, targets, out_mask, burn_in=3):
+def get_icl_error(outputs, targets, out_mask):
     icl_mask_flat = (out_mask==1)[:,:-1].reshape(-1)
     preds = torch.argmax(outputs, dim=-1)
-    icl_error = (preds[icl_mask_flat][burn_in:] != targets[icl_mask_flat][burn_in:]).sum()
+    icl_error = (preds[icl_mask_flat] != targets[icl_mask_flat]).sum()
     total = icl_mask_flat.sum()
     icl_loss = icl_error.float() / total.float()
     return icl_loss.item()
@@ -107,9 +111,9 @@ def get_bigram_icl_loss(outputs, targets, out_mask):
     # icl_mask_flat = (shifted_mask>0)[:,:-1].reshape(-1)
     icl_mask_flat = (out_mask==1)[:,:-1].reshape(-1)
     criterion = nn.CrossEntropyLoss()
-    bigram_loss = criterion(outputs[~icl_mask_flat], targets[~icl_mask_flat])
+    id_loss = criterion(outputs[~icl_mask_flat], targets[~icl_mask_flat])
     icl_loss = criterion(outputs[icl_mask_flat], targets[icl_mask_flat])
-    return bigram_loss.item(), icl_loss.item()
+    return id_loss.item(), icl_loss.item()
 
 
 def get_train_result(**kwargs):

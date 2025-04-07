@@ -153,9 +153,14 @@ def plot_bigram_icl_risk(config, train_results, folder="loss_plots", show=False)
 
     id_losses, icl_losses = log["eval/IDLoss"], log["eval/ICLLoss"]
     ood_losses_smoothed = None
+    copy_errors_smoothed = None
     if len(log["eval/OODLoss"]) > 0:
         ood_losses = log["eval/OODLoss"]
         ood_losses_smoothed = moving_average(ood_losses)
+    
+    if len(log["eval/CopyError"]) > 0:
+        copy_errors = log["eval/CopyError"]
+        copy_errors_smoothed = moving_average(copy_errors)
 
     id_losses_smoothed = moving_average(id_losses)
     icl_losses_smoothed = moving_average(icl_losses)
@@ -170,6 +175,11 @@ def plot_bigram_icl_risk(config, train_results, folder="loss_plots", show=False)
     if ood_losses_smoothed is not None:
         axes[0].plot(range_vec[:len(ood_losses_smoothed)], ood_losses_smoothed, linestyle='-', label='OOD Risk')
         axes[1].plot(range_vec[:len(ood_losses_smoothed)], ood_losses_smoothed, linestyle='-', label='OOD Risk')
+    
+    if copy_errors_smoothed is not None:
+        axes[0].plot(range_vec[:len(copy_errors_smoothed)], copy_errors_smoothed, linestyle='-', label='Copy Error')
+        axes[1].plot(range_vec[:len(copy_errors_smoothed)], copy_errors_smoothed, linestyle='-', label='Copy Error')
+
     axes[1].set_xscale('log')
     axes[0].set_xlabel('Steps')
     axes[1].set_xlabel('Steps (Log Scale)')

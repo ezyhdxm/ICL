@@ -216,6 +216,7 @@ def combined_icl_probe(num_tokens, model, device='cpu'):
     targets = torch.eye(num_tokens).to(device)
     return TV_dist(targets, probs)
 
+
 #################
 # Get Attention #
 #################
@@ -232,9 +233,6 @@ def get_attn(batch, layer, model, seq_len, device="cpu"):
     QK = QK.masked_fill(model.layers[layer].MHA.mask==0, -float("inf"))
     A = F.softmax(QK, dim=-1)
     return A
-
-
-
 
 
 

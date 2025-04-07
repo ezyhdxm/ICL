@@ -195,6 +195,7 @@ class FRMarkovSampler:
         self.dirichlet_dist = torch.distributions.Dirichlet(torch.ones(self.num_states, device=self.device)*config.task.alpha)
         self.random_dist = get_dist(config) #RandomHotDistribution(num_states=self.num_states, card=self.card) # torch.distributions.Dirichlet(torch.ones(self.num_states, device=self.device)*config.random_alpha)
         self.ood_random_dist = get_dist(config, ood=True)
+        # self.copy_dist = RandomHotDistribution(config)
         self.powers = (self.num_states ** torch.arange(self.order - 1, -1, -1, device=self.device)).long()
         # Sample all transition probabilities in one go
         self.trans_mat = self.dirichlet_dist.sample((self.num_states_order,))  # Shape: (num_states_order, num_states)
@@ -225,9 +226,7 @@ class FRMarkovSampler:
             old_k = self.k
             self.k = 0
             num_samples = num_samples if num_samples is not None else self.batch_size
-        elif mode == "eval":
-            num_samples = num_samples if num_samples is not None else self.eval_size
-        elif mode == "ood":
+        elif mode in ["eval", "ood", "copy"]:
             num_samples = num_samples if num_samples is not None else self.eval_size
 
         num_samples *= epochs
@@ -247,7 +246,13 @@ class FRMarkovSampler:
         if (not self.fixed) and (self.k > 0):
             self.q_toks = torch.argsort(torch.rand(num_samples, self.num_states), dim=1)[:, :self.k] # shape: (num_samples, random_rows_size)
             self.q_toks = self.q_toks.to(self.device)
+            if mode == "copy":
+                trans_probs = torch.ones((num_samples*self.k, self.num_states)).to(self.device)  # Shape: (num_samples * k, num_states)
+                trans_probs[torch.arange(num_samples*self.k), self.q_toks.reshape(-1)] = 0 # Avoid repeating the same token
 
+                trans_probs /= trans_probs.sum(dim=-1, keepdim=True) # Uniform output tokens.
+                o_toks = torch.multinomial(trans_probs, num_samples=1).reshape(num_samples, self.k) # Shape: (num_samples, k)
+                trans_random = F.one_hot(o_toks, num_classes=self.num_states).to(self.device, dtype=torch.float32)  # Shape: (num_samples, k, num_states)
             if verbose:
                 print(f"Random triggers: {self.q_toks}")
 
@@ -292,7 +297,7 @@ class FRMarkovSampler:
                 else:
                     return samples, output_mask, trans_random
         
-        if mode == "ood":
+        if mode in ["ood", "copy"]:
             if return_triggers:
                 return samples, output_mask, self.q_toks, trans_random
             else:

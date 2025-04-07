@@ -22,7 +22,7 @@ class RandomHotDistribution(Distribution):
         # Total number of samples to generate
         total_samples = int(torch.tensor(shape).prod())
 
-        # Sample 2 unique indices per distribution
+        # Sample unique indices per distribution
         indices = self.sample_index_comb_vec(total_samples)
 
         # Create the output tensor

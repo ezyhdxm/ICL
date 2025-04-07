@@ -546,17 +546,10 @@ def plot_incoh_heatmat(save_dir, model, setting_params, remove_firstlast=True):
 
 
 def plot_err_over_pos(
-    model,
-    src_list,
-    vocab_size,
-    fig_name,
-    criterion=nn.CrossEntropyLoss(reduction="none"),
-    lens=None,
-    src_labels=None,
-    starts=None,
-    return_predictions=False,
-    ignore_Aa=False,
-    save_dir="Figs",
+    model, src_list, vocab_size, fig_name,
+    criterion=nn.CrossEntropyLoss(reduction="none"), lens=None,
+    src_labels=None, starts=None, return_predictions=False,
+    ignore_Aa=False, save_dir="Figs",
 ):
     """
     This function makes a plot to show the error of next-token prediction at each position
@@ -663,10 +656,8 @@ def plot_err_over_pos(
     vocab_halfsize = vocab_size // 2
     eps = 1e-6
     model.eval()
-    loss_list = []
-    err_list = []
-    err2_list = []
-    pred_list = []
+    loss_list, err_list = [], []
+    err2_list, pred_list = [], []
 
     for i, src in enumerate(src_list):
         N, T = src.size()

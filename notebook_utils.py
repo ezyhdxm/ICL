@@ -4,7 +4,8 @@ import torch.nn.functional as F
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
-from collections import defaultdict
+import matplotlib.cm as cm
+
 from itertools import product
 from IPython.display import display
 import os
@@ -16,6 +17,9 @@ import json
 from train import get_sampler
 from models.base_models import Transformer
 import pickle
+from datetime import datetime
+
+
 
 ###############################
 # Memory Probes
@@ -88,7 +92,7 @@ def get_high_order_memory(model, sampler, toks, mlp=False):
     
     print("-"*50)
     for i, key in enumerate(df.keys()):
-        kl = F.kl_div(ground_truth.log(), torch.tensor(df[key].values), reduction="sum")
+        kl = F.kl_div(torch.tensor(df[key].values).log(), ground_truth, reduction="sum")
         sig = ""
         if kl < 0.05:
             sig = " ***"
@@ -138,7 +142,7 @@ def high_order_memory_probe_df(model, sampler, to_probe="ff+res"):
         else:
             df.loc[p] = out_ffn_res_prob.numpy()
 
-    print(f"KL divergence: {F.kl_div(sampler.trans_mat.log().cpu(), torch.tensor(df.values), reduction="none").sum(axis=-1).mean():.4f}")
+    print(f"KL divergence: {F.kl_div(torch.tensor(df.values).log(), sampler.trans_mat.cpu(), reduction="none").sum(axis=-1).mean():.4f}")
     return df
 
 def high_order_memory_probe_ff_df(model, sampler):
@@ -160,7 +164,7 @@ def high_order_memory_probe_ff_df(model, sampler):
         out_ffn_prob = nn.Softmax(dim=-1)(model.output_layer(out_ffn))[0][pos+order-1].detach().cpu()
         df.loc[p] = out_ffn_prob.numpy()
 
-    print(f"KL divergence: {F.kl_div(sampler.trans_mat.log().cpu(), torch.tensor(df.values), reduction="none").sum(axis=-1).mean():.4f}")
+    print(f"KL divergence: {F.kl_div(torch.tensor(df.values).log(), sampler.trans_mat.cpu(), reduction="none").sum(axis=-1).mean():.4f}")
     return df
 
 
@@ -246,6 +250,7 @@ def get_single_task_vector(config, sampler, model, task_id, ffn=True):
 
     return task_vec, trans_random[0].squeeze(0)
 
+
 def get_task_vectors(config, sampler, model, ffn=True):
     task_vecs  = torch.zeros((config.task.total_trans, config.model.emb_dim), device=config.device)
     for task_id in range(config.task.total_trans):
@@ -283,14 +288,16 @@ def id_icl_single_error(config, sampler, model, task_id):
     logits = model(batch)[0]
     probs = F.softmax(logits[torch.arange(logits.size(0)), last_indices], dim=-1)
     
-    kl = F.kl_div(trans_random[0].squeeze(0).log(), probs, reduction="none").sum(axis=-1).mean()
+    kl = F.kl_div(probs.log(), trans_random[0].squeeze(0), reduction="none").sum(axis=-1).mean()
     return kl.detach().cpu().item()
+
 
 def get_id_icl_error(config, sampler, model):
     kl_loss = torch.zeros(config.task.total_trans)
     for task_id in range(config.task.total_trans):
         kl_loss[task_id] = id_icl_single_error(config, sampler, model, task_id)
     return kl_loss
+
 
 def eval_tv_id_error(tvs, sampler, model, config, ffn):
     if ffn:
@@ -301,3 +308,78 @@ def eval_tv_id_error(tvs, sampler, model, config, ffn):
         kl = F.kl_div(sampler.random_dist.task_pool.cuda().log(), 
                 nn.Softmax(dim=-1)(model.output_layer(mlp_out + tvs.to(config.device))), reduction="none").sum(dim=-1)
     return kl.detach().cpu()
+
+
+def lighten(color, amount=0.5):
+    """Blend color with white."""
+    white = torch.tensor([1.0, 1.0, 1.0])
+    base = torch.tensor(color[:3])
+    blended = base + (white - base) * amount
+    return (*blended.tolist(), color[3] if len(color) > 3 else 1.0)
+
+def get_pos_loss(model, sampler, mode, folder, n_sumples=1):
+    cmap = cm.get_cmap('tab10')  # or 'Set1', 'tab20', etc.
+
+    NUM_SAMPLES = n_sumples
+
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    vocab_size = sampler.num_states
+    batch, mask, trigger, trans_random = sampler.generate(num_samples=NUM_SAMPLES, mode=mode, return_triggers=True)
+    logits = model(batch)[0]
+    preds = F.softmax(logits, dim=-1)
+
+    losses = F.kl_div(preds.log(), trans_random, reduction="none").sum(dim=-1)
+    closest = [float("inf")]*NUM_SAMPLES
+    if sampler.random_dist.n_tasks > 0:
+        if (sampler.random_dist.n_tasks > 4096):
+            task_inds = torch.randperm(sampler.random_dist.n_tasks)[:4096].tolist()
+        else:
+            task_inds = torch.arange(sampler.random_dist.n_tasks).tolist()
+        for i in task_inds:
+            for b in range(NUM_SAMPLES):
+                closest[b] = min(closest[b], F.kl_div(sampler.random_dist.task_pool[i].log(), trans_random[b].cpu(), reduction="none").sum()) 
+    
+    if sampler.order == 1:
+        memory = [0] * NUM_SAMPLES
+        for b in range(NUM_SAMPLES):
+            memory[b] = F.kl_div(sampler.trans_mat[batch[0][trigger[0]]].log().cpu(), trans_random[b].cpu(), reduction="none").sum()
+    
+    seqs = torch.arange(batch.size(1))
+
+    for b in range(NUM_SAMPLES):
+        valid_indices = torch.nonzero(mask[b].cpu(), as_tuple=True)[0][:-1]
+        target = batch[b][valid_indices+1]
+        emp_counts = torch.ones(vocab_size)
+        emp_losses = torch.zeros_like(valid_indices, dtype=torch.float32)
+        for i in range(len(valid_indices)):
+            emp_probs = emp_counts / emp_counts.sum()
+            emp_losses[i] = F.kl_div(emp_probs.log(), trans_random[b].cpu(), reduction="none").sum()
+            token = target[i]
+            emp_counts[token] += 1.0
+        
+        base_color = cmap((2*b)%10)
+        model_color = lighten(base_color, amount=0)
+        empirical_color = lighten(base_color, amount=0.4)
+        icl_color = lighten(cmap((2*b)%10), amount=0.2)
+        memory_color = lighten(cmap((2*b)%10), amount=0.4)
+
+        plt.plot(seqs[valid_indices], losses[b][valid_indices].detach().cpu(), marker='o', linestyle='-', 
+                 label=f"Model {b}", markersize=3, alpha=0.6, color=model_color)
+        
+        plt.plot(seqs[valid_indices], emp_losses.detach().cpu(), marker='x', linestyle='dashdot', 
+                 label=f"Empirical {b}", markersize=3, alpha=1, color=empirical_color)
+        
+        if closest[b] != float("inf"):
+            plt.axhline(y=closest[b], color=icl_color, linestyle='--', linewidth=1, label=f"ICL {b}")
+        if sampler.order == 1:
+            plt.axhline(y=memory[b], color=memory_color, linestyle='dotted', linewidth=1, label=f"Memory {b}")
+    
+    plt.title("KL Divergence over Positions")
+    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', borderaxespad=0.)
+    plt.tight_layout()
+    image_path = os.path.join(folder, f"loss_over_pos_{mode}_{timestamp}.png")
+    plt.savefig(image_path)
+    plt.show()
+    
+
+    return losses.detach().cpu(), mask.detach().cpu()

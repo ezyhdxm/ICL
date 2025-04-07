@@ -51,11 +51,12 @@ def _init_log() -> dict:
     log = {"train/step": [], "train/lr": [], "train/loss": [], 
            "baseline": {},
            "eval/loss": [], "eval/step": [], 
-           "eval/IDLoss": [], "eval/ICLLoss": [], "eval/OODLoss": [],}
+           "eval/IDLoss": [], "eval/ICLLoss": [], "eval/OODLoss": [], "eval/CopyError": [],
+           }
     return log
 
 
-def train_trigger(model, config):
+def train_trigger(model, config, verbose=False):
     
     exp_name = f"train_{get_hash(config)}"
     exp_dir = os.path.join(config.work_dir, exp_name)   
@@ -115,8 +116,10 @@ def train_trigger(model, config):
     
     if config.task.ood:
         ood_batch, ood_mask = sampler.generate(mode="ood")
+        copy_batch, copy_mask = sampler.generate(mode="copy")
     else:
         ood_batch, ood_mask = None, None
+        copy_batch, copy_mask = None, None
     eval_batch, eval_mask = sampler.generate(mode="eval")
     probe_batch = sampler.generate(mode="probe")
     
@@ -189,8 +192,9 @@ def train_trigger(model, config):
                 with torch.no_grad():
                     # collect probes etc.
                     model.eval()
-                    id_loss, icl_loss, ood_loss = bietti_bb_handler(model, eval_batch, eval_mask, probes, probe_batch, 
-                                                                        config, sampler, random_tokens, layer, ood_batch, ood_mask)
+                    id_loss, icl_loss, ood_loss, copy_error = trigger_handler(model, eval_batch, eval_mask, probes, probe_batch, 
+                                                                  config, sampler, random_tokens, layer, 
+                                                                  ood_batch, ood_mask, copy_batch, copy_mask)
                     log["eval/IDLoss"].append(id_loss)
                     wandb.log({"eval/IDLoss": id_loss}, step=step)
                     log["eval/ICLLoss"].append(icl_loss)
@@ -198,9 +202,13 @@ def train_trigger(model, config):
                     if ood_loss is not None:
                         log["eval/OODLoss"].append(ood_loss)
                         wandb.log({"eval/OODLoss": ood_loss}, step=step)
+                    if copy_error is not None:
+                        log["eval/CopyError"].append(copy_error)
+                        wandb.log({"eval/CopyError": copy_error}, step=step)
 
             if step % config.training.eval_iter == 0:
-                print(f"Step: {step}")
+                if verbose:
+                    print(f"Step: {step}")
                 log["train/step"].append(step)
                 lr_val = scheduler.get_last_lr()[0] if scheduler else config.training.learning_rate
                 log["train/lr"].append(lr_val)
@@ -235,7 +243,7 @@ def train_trigger(model, config):
 
 
 
-def train_latent(model, config):
+def train_latent(model, config, verbose=False):
 
     exp_name = f"train_{get_hash(config)}"
     exp_dir = os.path.join(config.work_dir, exp_name)  
@@ -282,6 +290,7 @@ def train_latent(model, config):
     is_icl = "icl" in config.task.name
     
     test_data, test_info = sampler.generate(mode="test")
+    print(test_data.shape)
     test_target = test_data[:, 1:].reshape(-1)
     
     
@@ -308,6 +317,8 @@ def train_latent(model, config):
         epochs -= 1
 
     tot_iters = config.training.num_epochs // epochs
+
+    wandb.init(config=config, name=exp_name, **config["wandb"])
 
     
     ##################
@@ -348,6 +359,7 @@ def train_latent(model, config):
             #        task_handler(model, batch, outputs, batch_info, criterion, bigram_losses, icl_losses, probes, config, sampler, random_tokens, layer)
             
             log["train/loss"].append(loss.item())
+            wandb.log({"train/loss": loss.item()}, step=step)
             loss.backward()
             optimizer.step()
             if scheduler: scheduler.step()
@@ -363,7 +375,8 @@ def train_latent(model, config):
 
 
             if step % config.training.eval_iter == 0:
-                print(f"Step: {step}")
+                if verbose:
+                    print(f"Step: {step}")
                 log["train/step"].append(step)
                 lr_val = scheduler.get_last_lr()[0] if scheduler else config.training.learning_rate
                 log["train/lr"].append(lr_val)

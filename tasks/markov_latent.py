@@ -14,10 +14,10 @@ class LatentMarkov:
         self.batch_size = config.batch_size
         self.test_size = config.test_size
         self.device = config.device
-        self.total_trans = config.total_trans
-        self.order = config.order
+        self.total_trans = config.task.total_trans
+        self.order = config.task.order
 
-        dirichlet_dist = torch.distributions.Dirichlet(torch.ones(self.num_states, device=self.device) * config.alpha)
+        dirichlet_dist = torch.distributions.Dirichlet(torch.ones(self.num_states, device=self.device) * config.task.alpha)
 
         self.powers = (self.num_states ** torch.arange(self.order - 1, -1, -1, device=self.device)).long()
         
@@ -52,6 +52,9 @@ class LatentMarkov:
             # state = torch.cat([state[:, 1:], next_states.unsqueeze(1)], dim=1)
             state[:, :-1] = state[:, 1:]  # Shift left
             state[:, -1] = next_states    # Append new state
+        
+        if mode in ["eval", "test"]:
+            return samples, probs
             
         return samples.reshape(epochs, -1, self.seq_len), probs.reshape(epochs, -1, self.num_states)
     
