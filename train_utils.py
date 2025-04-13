@@ -121,41 +121,6 @@ def get_train_result(**kwargs):
 
 
 
-
-
-
-
-
-
-
-# Not in use      
-class SimulatedDataset(Dataset):
-    def __init__(self, sampler, num_samples):
-        self.num_samples = num_samples
-        self.sampler = sampler
-
-    def __len__(self):
-        return self.num_samples
-
-    def __getitem__(self, idx):
-        # Generate sample on-the-fly
-        return self.sampler.generate()
-
-def save_model(model, config, train_results):
-    os.makedirs("models", exist_ok=True)
-    model_name = f"{config.task.name}_{config.model.num_heads}H_{config.model.num_layers}L"
-    if any(config.model.mlp):
-        model_name += "_MLP"
-    if any(config.model.activation):
-        model_name += "_ReLU"
-    model_name += f"_{config.model.pos_enc}"
-    model_name += f"_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    torch.save({
-        'model_state_dict': model.state_dict(),
-        'config': config,
-        'train_results': train_results
-    }, f"models/{model_name}.pt")
-    print(f"Model saved as {model_name}.pt")
     
 
 def tabulate_model(model: torch.nn.Module, seq_len: int, batch_size: int, device: str) -> str:
@@ -169,3 +134,34 @@ def tabulate_model(model: torch.nn.Module, seq_len: int, batch_size: int, device
         return str(info)
     except Exception as e:
         return f"Could not tabulate model: {e}"
+    
+
+
+def pth_score(model, batch):
+    embs = model.embed(batch)
+    _, attn = model.layers[0].MHA(embs, True)
+    attn = attn.squeeze(1)
+    return attn.mean(dim=0).diagonal(offset=-1).mean().item()
+
+def ih_score(model, batch, device):
+    embs = model.embed(batch)
+    hiddens, _ = model.layers[0](embs)
+    _, attns = model.layers[1](hiddens, True)
+    attns = attns.squeeze(1)
+    B, T = batch.shape
+    
+    # Compare all pairs: (B, T, T), batch[b, i] == batch[b, t]
+    matches = (batch.unsqueeze(2) == batch.unsqueeze(1))  # (B, T, T)
+    
+    # Mask out positions where i >= t (i.e., keep only i < t)
+    tril_mask = torch.tril(torch.ones(T, T, dtype=torch.bool, device=device), diagonal=-1)  # (T, T)
+    valid_matches = matches & tril_mask  # broadcasted to (B, T, T)
+    b_indices, t_indices, i_indices = valid_matches.nonzero(as_tuple=True)
+    grouped_sums = torch.zeros((B, T), device=device)  # (B, T)
+
+    # Accumulate values at corresponding (b, t) positions
+    grouped_sums.index_put_((b_indices, t_indices), attns[b_indices, t_indices, i_indices+1], accumulate=True)
+    return grouped_sums.mean(dim=0)[1:].mean().item()
+
+
+

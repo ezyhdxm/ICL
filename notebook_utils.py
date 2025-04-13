@@ -1,10 +1,15 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
+import matplotlib.colors as mcolors
+from matplotlib.colors import LogNorm
+
+from pprint import pprint
 
 from itertools import product
 from IPython.display import display
@@ -19,7 +24,12 @@ from models.base_models import Transformer
 import pickle
 from datetime import datetime
 
+import linear_algebra_utils as lau
 
+import hashlib
+
+def hash_array(arr):
+    return hashlib.sha256(arr.tobytes()).hexdigest()
 
 ###############################
 # Memory Probes
@@ -213,6 +223,44 @@ def load_config(config_path):
     config = ConfigDict(config_dict)
     return config
 
+
+# If you do not know the exact folder name, 
+# you can use this function to get the list of folders 
+# with the same number of transition matrices.
+
+def get_config(total_trans=None, path=None):
+    DEFAULT_PATH = os.path.join("results", "latent")
+    if path is None:
+        path = DEFAULT_PATH
+    if total_trans is None:
+        total_trans_list = []
+        
+        for folder in os.listdir(path):
+            if os.path.isdir(os.path.join(path, folder)):
+                config = load_config(os.path.join(path, folder, "config.json"))
+                total_trans_list.append(config.task.total_trans)
+        pprint(f"You can choose from the following number of total transition matrices: \n {sorted(total_trans_list)}")
+    else:
+        folder_list = []
+        for folder in os.listdir(path):
+            if os.path.isdir(os.path.join(path, folder)):
+                config = load_config(os.path.join(path, folder, "config.json"))
+                if config.task.total_trans == total_trans:
+                    folder_list.append(folder)
+        pprint(f"You can choose from the following folders: {folder_list}")
+        
+        return folder_list
+
+
+####################
+# Load Log
+####################
+
+def load_log(log_path):
+    with open(log_path, "r") as f:
+        log_data = json.load(f)
+    return log_data
+
 #####################
 # Load Sampler
 #####################
@@ -222,14 +270,23 @@ def load_sampler(sampler_path):
     return sampler
 
 
-
+def load_everything(task_name, train_folder):
+    path_prefix = os.path.join("results", task_name)
+    train_folder = train_folder
+    checkpoint_dir = os.path.join(path_prefix, train_folder, "checkpoints")
+    config_path = os.path.join(path_prefix, train_folder, "config.json")
+    sampler_path = os.path.join(path_prefix, train_folder, "sampler.pkl")
+    config = load_config(config_path)
+    model = load_model(checkpoint_dir, config)
+    sampler = load_sampler(sampler_path)
+    return model, sampler, config
 
 
 ######################
 # Task Vector
 ######################
 
-def get_single_task_vector(config, sampler, model, task_id, ffn=True):
+def get_single_task_vector_trigger(config, sampler, model, task_id, ffn=True):
     assert task_id < config.task.total_trans , f"Task ID {task_id} out of range"
     batch, mask, q_toks, trans_random = sampler.generate(mode="testing", task=task_id, num_samples=16, return_triggers=True)
 
@@ -251,10 +308,10 @@ def get_single_task_vector(config, sampler, model, task_id, ffn=True):
     return task_vec, trans_random[0].squeeze(0)
 
 
-def get_task_vectors(config, sampler, model, ffn=True):
+def get_task_vectors_trigger(config, sampler, model, ffn=True):
     task_vecs  = torch.zeros((config.task.total_trans, config.model.emb_dim), device=config.device)
     for task_id in range(config.task.total_trans):
-        tv = get_single_task_vector(config, sampler, model, task_id, ffn)[0]
+        tv = get_single_task_vector_trigger(config, sampler, model, task_id, ffn)[0]
         task_vecs[task_id, :] = tv
     
     return task_vecs.detach().cpu()
@@ -383,3 +440,379 @@ def get_pos_loss(model, sampler, mode, folder, n_sumples=1):
     
 
     return losses.detach().cpu(), mask.detach().cpu()
+
+
+
+#######################
+# Latent Markov Chain #
+#######################
+
+def get_empirical_transition(model, sampler, task, pos=400, num_samples=1024):
+    assert task < sampler.total_trans, "task id out of range"
+    assert pos < sampler.seq_len, "position out of range"
+
+    model.eval()
+    device = sampler.device
+
+    if num_samples > 1:
+        trans_mat_est = torch.zeros((sampler.num_states_order, sampler.num_states), device=device)
+        batch, prob = sampler.generate(num_samples=num_samples, mode="testing", task=task)
+        logits, _ = model(batch)
+        preds = torch.softmax(logits, dim=-1)
+        probs = preds[:, pos] # (B, N)
+        states = batch[:, (pos-sampler.order+1):(pos+1)] # (B, O)
+        states_indices = torch.sum(states * sampler.powers, dim=1)  # (B,)
+        trans_mat_est = trans_mat_est.scatter_add(0, states_indices.unsqueeze(1).expand(-1, sampler.num_states), probs)
+        counts = torch.bincount(states_indices, minlength=sampler.num_states_order).clamp(min=1)
+        trans_mat_est /= counts.unsqueeze(1)  # Normalize by the counts
+        return trans_mat_est.detach().cpu()
+
+    else:
+        perms = list(product(range(sampler.num_states), repeat=sampler.order))
+        batch, prob = sampler.generate(num_samples=len(perms), mode="testing", task=task)
+        perms = torch.tensor(perms, device=device)
+        
+        batch[:, (pos-sampler.order+1):(pos+1)] = perms 
+        logits, _ = model(batch)
+        preds = torch.softmax(logits, dim=-1)
+        probs = preds[:, pos]
+        
+        return probs.detach().cpu()
+
+
+
+def kl_div_ave(P: torch.Tensor, Q: torch.Tensor) -> float:
+    """
+    Compute the KL divergence between two transition matrices P and Q.
+    Q is the true transition matrix, and P is the estimated transition matrix.
+    P and Q should be 2D tensors of the same size.
+    """
+    assert P.size() == Q.size(), "P and Q must have the same size."
+    P = P.to(Q.device)  # Ensure P is on the same device as Q
+    mu = lau.get_stationary(Q)
+    kl = F.kl_div(P.log(), Q, reduction="none").sum(dim=-1)
+    return (kl * mu).sum(dim=-1).cpu().item() # Average over the rows
+
+
+
+##########################
+# Phase Transition Plots #
+##########################
+
+def get_loss_lineplot(task_name, task_ids=None):
+    folder_path = os.path.join("results", task_name)
+    folders = [name for name in os.listdir(folder_path) if os.path.isdir(os.path.join(folder_path, name))]
+
+    # Create a 1x2 subplot layout
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5), sharey=True)  # adjust figsize as needed
+
+    # Define normalization and colormap
+    if task_ids is None:
+        norm = mcolors.Normalize(vmin=0, vmax=13)
+    else:
+        norm = mcolors.Normalize(vmin=min(task_ids), vmax=max(task_ids))
+    cmap = plt.get_cmap('plasma')
+    sm = cm.ScalarMappable(cmap=cmap, norm=norm)
+    sm.set_array([])
+
+    for i in range(len(folders)):
+        result_path = os.path.join(folder_path, folders[i])
+        log_path = os.path.join(result_path, "log.json")
+        config_path = os.path.join(result_path, "config.json")
+        log_data = load_log(log_path)
+        config = load_config(config_path)
+
+        if (task_ids is not None) and (config.task.total_trans not in task_ids):
+            continue
+        
+        if task_ids is None:
+            value = np.log2(config.task.total_trans)
+        else:
+            value = config.task.total_trans
+        color = cmap(norm(value))
+        
+        # Plot 1: OOD Loss
+        ax2.plot(log_data["eval/step"], log_data["eval/OODLoss"], color=color, alpha=0.6)
+        
+        # Plot 2: Some other metric (e.g., ID Loss)
+        ax1.plot(log_data["eval/step"], log_data["eval/loss"], color=color, alpha=0.6)
+
+
+
+    # Customize each subplot
+    ax2.set_xscale("log")
+    ax2.set_title("OOD Loss vs Step")
+    ax2.set_xlabel("Step")
+
+    ax1.set_xscale("log")
+    ax1.set_title("ID Loss vs Step")
+    ax1.set_xlabel("Step")
+    ax1.set_ylabel("Loss")
+
+    plt.subplots_adjust(wspace=0.02)  # Try 0 for zero gap
+    # Add colorbar to the whole figure
+    cbar = fig.colorbar(sm, ax=[ax1, ax2], orientation='vertical')
+    cbar.set_label("Total Transitions")
+
+    if task_ids is None:
+        plt.savefig(os.path.join(folder_path, "loss_lineplots.png"))
+    else:
+        plt.savefig(os.path.join(folder_path, f"loss_lineplots_{hash_array(task_ids)}.png"))
+    plt.show()
+
+
+def get_loss_heatmap_data(task_name, measure, task_ids=None):
+    measure_name = {"ood": "OODLoss", "id": "loss", "ih": "ih_score", "pth": "pth_score"}
+    folder_path = os.path.join("results", task_name)
+    folders = [name for name in os.listdir(folder_path) if os.path.isdir(os.path.join(folder_path, name))]
+
+    # Collect all steps and transitions first
+    all_steps = set()
+    all_trans = set()
+    data_dict = {}
+
+    for folder in folders:
+        result_path = os.path.join(folder_path, folder)
+        log_path = os.path.join(result_path, "log.json")
+        config_path = os.path.join(result_path, "config.json")
+
+        log_data = load_log(log_path)
+        config = load_config(config_path)
+
+        trans = config.task.total_trans
+        if (task_ids is not None) and (trans not in task_ids):
+            continue
+
+        steps = log_data["eval/step"]
+        losses = log_data[f"eval/{measure_name[measure]}"]  # or "eval/loss" for ID
+
+        for step, loss in zip(steps, losses):
+            all_steps.add(step)
+            all_trans.add(trans)
+            data_dict[(trans, step)] = loss
+
+    # Sort axes
+    sorted_steps = sorted(all_steps)
+    sorted_trans = sorted(all_trans)
+
+    # Create heatmap matrix
+    heatmap = np.full((len(sorted_trans), len(sorted_steps)), np.nan)
+
+    trans_idx = {v: i for i, v in enumerate(sorted_trans)}
+    step_idx = {v: i for i, v in enumerate(sorted_steps)}
+
+    for (trans, step), loss in data_dict.items():
+        i = trans_idx[trans]
+        j = step_idx[step]
+        heatmap[i, j] = loss
+    return heatmap, sorted_steps, sorted_trans
+
+def get_loss_heatmap(task_name, measure, task_ids=None, log_scale=False):
+    measure_name = {"ood": "OODLoss", "id": "loss", "ih": "ih_score", "pth": "pth_score"}
+    folder_path = os.path.join("results", task_name)
+    measure_title = {"ood": "OOD Loss", "id": "ID Loss", "ih": "Induction Head Score", "pth": "Previous Token Head Score"}
+    
+    heatmap, sorted_steps, sorted_trans = get_loss_heatmap_data(task_name, measure, task_ids=task_ids)
+
+    # Plot the heatmap
+    fig, ax = plt.subplots(figsize=(8, 6))
+    cmap = plt.get_cmap("plasma")
+    im = ax.imshow(heatmap, aspect='auto', cmap=cmap, origin='lower')
+
+    if log_scale:
+        ax.set_xscale("log")
+    ax.invert_yaxis()
+    ax.set_xlabel("Step")
+    ax.set_ylabel("Total Transitions")
+    ax.set_xticks(np.arange(0, len(sorted_steps), 25))
+    ax.set_yticks(np.arange(0, len(sorted_trans), 5))
+    ax.set_xticklabels(sorted_steps[::25], rotation=45)
+    ax.set_yticklabels(sorted_trans[::5])
+    ax.set_title(f"{measure_title[measure]} Heatmap")
+
+    cbar = fig.colorbar(im, ax=ax)
+    if measure in ["ih", "pth"]:
+        cbar.set_label("Attention Score")
+    else:
+        cbar.set_label("Loss")
+
+    plt.tight_layout()
+    if task_ids is None:
+        plt.savefig(os.path.join(folder_path, f"{measure_name[measure]}_heatmap.png"))
+    else:
+        plt.savefig(os.path.join(folder_path, f"{measure_name[measure]}_heatmap_{hash_array(task_ids)}.png"))
+    plt.show()
+
+
+def get_loss_heatmap_dual(task_name, task_ids=None, log_scale=False):
+    folder_path = os.path.join("results", task_name)
+    heatmap_ood, sorted_steps, sorted_trans = get_loss_heatmap_data(task_name, "ood", task_ids=task_ids)
+    heatmap_id, _, _ = get_loss_heatmap_data(task_name, "id", task_ids=task_ids)
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6), sharey=True)
+    # Shared color scale: choose LogNorm or Normalize
+    data_all = np.concatenate([heatmap_id, heatmap_ood])
+    if log_scale:
+        norm = LogNorm(vmin=np.nanmin(data_all[data_all > 0]), vmax=np.nanmax(data_all))
+    else:
+        norm = mcolors.Normalize(vmin=np.nanmin(data_all), vmax=np.nanmax(data_all))
+
+    # Heatmap 1: ID Loss
+    im1 = ax1.imshow(
+        heatmap_id,
+        aspect='auto',
+        origin='lower',
+        cmap='plasma',
+        norm=norm
+    )
+
+
+    ax1.set_title("ID Loss")
+    ax1.set_xlabel("Step")
+    ax1.set_ylabel("Total Transitions")
+    ax1.set_xticks(np.arange(0, len(sorted_steps), 50))
+    ax1.set_yticks(np.arange(0, len(sorted_trans), 5))
+    ax1.set_xticklabels(sorted_steps[::50], rotation=45)
+    ax1.set_yticklabels(sorted_trans[::5])
+    ax1.invert_yaxis()
+
+    # Heatmap 2: OOD Loss
+    im2 = ax2.imshow(
+        heatmap_ood,
+        aspect='auto',
+        origin='lower',
+        cmap='plasma',
+        norm=norm
+    )
+
+    ax2.set_title("OOD Loss")
+    ax2.set_xlabel("Step")
+    ax2.set_xticks(np.arange(0, len(sorted_steps), 50))
+    ax2.set_yticks(np.arange(0, len(sorted_trans), 5))
+    ax2.set_xticklabels(sorted_steps[::50], rotation=45)
+    ax2.set_yticklabels(sorted_trans[::5])
+    ax2.invert_yaxis()
+
+    plt.subplots_adjust(wspace=0.02)
+
+    # Shared colorbar
+    cbar = fig.colorbar(im2, ax=[ax1, ax2], orientation='vertical')
+    cbar.set_label("Loss")
+
+    
+
+    if task_ids is None:
+        plt.savefig(os.path.join(folder_path, f"losses_heatmap.png"))
+    else:
+        plt.savefig(os.path.join(folder_path, f"losses_heatmap_{hash_array(task_ids)}.png"))
+    plt.show()
+
+
+
+def get_attn_score_lineplot(task_name, task_ids=None):
+    folder_path = os.path.join("results", task_name)
+    folders = [name for name in os.listdir(folder_path) if os.path.isdir(os.path.join(folder_path, name))]
+    # Create a 1x2 subplot layout
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5), sharey=True)  # adjust figsize as needed
+
+    # Define normalization and colormap
+    if task_ids is None:
+        norm = mcolors.Normalize(vmin=0, vmax=13)
+    else:
+        norm = mcolors.Normalize(vmin=min(task_ids), vmax=max(task_ids))
+    cmap = plt.get_cmap('plasma')
+    sm = cm.ScalarMappable(cmap=cmap, norm=norm)
+    sm.set_array([])
+
+    for i in range(len(folders)):
+        result_path = os.path.join(folder_path, folders[i])
+        log_path = os.path.join(result_path, "log.json")
+        config_path = os.path.join(result_path, "config.json")
+        log_data = load_log(log_path)
+        config = load_config(config_path)
+
+        if (task_ids is not None) and (config.task.total_trans not in task_ids):
+            continue
+
+        if task_ids is None:
+            value = np.log2(config.task.total_trans)
+        else:
+            value = config.task.total_trans
+        
+        color = cmap(norm(value))
+        
+        # Plot 1: IH Score
+        ax2.plot(log_data["eval/step"], log_data["eval/ih_score"], color=color, alpha=0.6)
+        
+        # Plot 2: PTH Score
+        ax1.plot(log_data["eval/step"], log_data["eval/pth_score"], color=color, alpha=0.6)
+
+
+    # Customize each subplot
+    ax2.set_xscale("log")
+    ax2.set_title("Induction Head Score vs Step")
+    ax2.set_xlabel("Step")
+
+    ax1.set_xscale("log")
+    ax1.set_title("Previous Token Head Score vs Step")
+    ax1.set_xlabel("Step")
+    ax1.set_ylabel("Attention Score")
+
+    plt.subplots_adjust(wspace=0.02)  # Try 0 for zero gap
+    # Add colorbar to the whole figure
+    cbar = fig.colorbar(sm, ax=[ax1, ax2], orientation='vertical')
+    cbar.set_label("Total Transitions")
+
+    if task_ids is None:
+        plt.savefig(os.path.join(folder_path, "attn_scores_lineplots.png"))
+    else:
+        plt.savefig(os.path.join(folder_path, f"attn_scores_lineplots_{hash_array(task_ids)}.png"))
+    plt.show()
+
+
+def kl_plot(model, sampler, task=None, num_samples=100):
+    if task == None:
+        batch, _, tasks = sampler.generate(mode="testing", task=task, num_samples=num_samples)
+        B,T = batch.shape
+        K = sampler.num_states
+        tasks_exp = tasks[:, None].expand(B, T)        # shape: (B, T)
+        batch_exp = batch                              # shape: (B, T)
+        
+        # Flatten for advanced indexing
+        flat_tasks = tasks_exp.reshape(-1)             # (B*T,)
+        flat_batch = batch_exp.reshape(-1)             # (B*T,)
+        
+        # Gather rows from trans_mat using tasks and batch
+        selected = sampler.trans_mat[flat_tasks, flat_batch]   # shape: (B*T, K)
+        
+        trans_probs = selected.view(B, T, K)
+    else:
+        batch, _ = sampler.generate(mode="testing", task=task, num_samples=num_samples)
+        trans_probs = sampler.trans_mat[task][batch]
+        
+    kl_losses = F.kl_div(nn.Softmax(dim=-1)(model(batch)[0]).log(), trans_probs, reduction="none").sum(dim=-1).detach().cpu().numpy() 
+    
+    # Create a 1D NumPy array
+    arr = np.arange(kl_losses.shape[1])
+    
+    mean_losses = np.mean(kl_losses, axis=0)
+    std_losses = np.std(kl_losses, axis=0)
+    
+    # Plot the array
+    plt.plot(arr, mean_losses)
+    plt.fill_between(arr, np.maximum(mean_losses - std_losses, 0), mean_losses + 2*std_losses, color='blue', alpha=0.3, label="Mean ± 3 std")
+    
+    plt.grid()
+    if task is not None:
+        plt.title(f"Average KL-divergence for task {task}")
+    else:
+        plt.title("Average KL-divergence over all tasks")
+    plt.xlabel("Positions")
+    plt.ylabel("KL-divergence")
+    plt.legend()
+    plt.tight_layout()
+    
+    plt.show()
+
+
+

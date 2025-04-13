@@ -2,7 +2,7 @@
 from models.base_models import Transformer
 from config import get_config
 from train import train_model_with_plot
-
+from tqdm.notebook import trange, tqdm
 
 def run_exp(show=True):
     config = get_config()
@@ -16,3 +16,19 @@ def run_exp(show=True):
     train_results = train_model_with_plot(model, config, show=show)
 
     return train_results, model
+
+
+def run_exp_with_trans(trans_low, trans_high, every=1, log_scale=False, base=2):
+    config = get_config()
+    # config.update_from_yaml(yaml_path)
+    # sampler_config = MarkovSamplerConfig()
+    # sampler_config.update_from_yaml(yaml_path)
+    for total_trans in trange(trans_low, trans_high, every, desc="Number of Transitions"):
+        if log_scale:
+            config.task.total_trans = int(base**total_trans)
+        else:
+            config.task.total_trans = total_trans
+        model = Transformer(config)
+        model = model.to(config.device)
+
+        _ = train_model_with_plot(model, config, show=False)

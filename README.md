@@ -1,8 +1,8 @@
 # Instructions
 
-To run the current ongoing experiments, see this [notebook](./TriggerMarkov.ipynb) for random triggers and this [notebook](./LatentModel.ipynb) for latent markov models. To access model checkpoints and saved results, please visit this [link](https://drive.google.com/drive/folders/18P3Q1RQ8pNOZ9mnbFvk27t289jPt8TRP?usp=sharing)
+To run the current ongoing experiments, see notebooks [TriggerMarkov.ipynb](./TriggerMarkov.ipynb) for random triggers, [LatentModel.ipynb](./LatentModel.ipynb) for latent markov models and [Linear.ipynb](./Linear.ipynb) for linear regression. Use [config.py](./config.py) to specify experiment configurations. Experiment results are stored in the [results](./results/) folder, where model checkpoints, plots and experiment configurations can be found. 
 
-The structure of this repositary is roughly summarized in the following file tree:
+The structure of this repositary is roughly summarized in the following file tree (might be outdated):
 
 ```
 ICL/
@@ -10,12 +10,12 @@ ICL/
 ├── tasks/
 │   ├── markov.py         # classes for different task samplers. 
 │   ├── causal_graph.py   # legacy class for causal graph samplers.
-│   ├── test_markov.py    # classes for the latent markov task sampler. 
-│   └── old_sampler.py    # legacy samplers.
+│   ├── markov_latent.py  # classes for the latent markov task sampler. 
+│   └── other files       # legacy files / utils or still under development.
 │ 
 │   
 ├── models/
-│   ├── ngram_learner.py  # empircal n-gram learners, used to provide baselines.
+│   ├── ngram_*.py        # empircal n-gram learners, used to provide baselines.
 │   ├── attention.py      # implementation of multi-head attention. 
 │   ├── base_models.py    # implementation of the base transformer model.
 │   ├── pos_encoder.py    # implementation of different positional encoding classes.
@@ -37,7 +37,7 @@ ICL/
 ```
 
 
-## Legacy
+## Legacy (Outdated)
 
 We are interested in understanding how transformers develop the in-context-learning ability through gradient descent. This repo reproduces implemetations of a few ICL experiments. Our implemetation is more efficient compared to some of the original implementations (see the [notebook](./Legacy/SpeedTest.ipynb) for more details). For demostrations of experiments in the previous literature, see the [notebook](./Legacy/LiterReview.ipynb). 
 

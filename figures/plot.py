@@ -25,6 +25,7 @@ def get_loss_plots(config, train_results, folder="loss_plots", show=False, verbo
     log = train_results["log"]
     train_losses, eval_losses, eval_steps = log["train/loss"], log["eval/loss"], log["eval/step"]
     baseline = log["baseline"] if "baseline" in log else []
+    ood_losses = log["eval/OODLoss"] if "eval/OODLoss" in log else []
     # many_ngram_losses = train_results["many_ngram_losses"] if "many_ngram_losses" in train_results else []
     # bayes_losses = train_results["bayes_losses"] if "bayes_losses" in train_results else []
     # last_token_losses = train_results["last_token_losses"] if "last_token_losses" in train_results else []
@@ -48,6 +49,10 @@ def get_loss_plots(config, train_results, folder="loss_plots", show=False, verbo
     
     axes[0].plot(eval_steps, eval_losses, linestyle='--', color='palevioletred', label='Validation Loss')
     axes[1].plot(eval_steps, eval_losses, linestyle='--', color='palevioletred', label='Validation Loss')
+
+    if len(ood_losses) >= 1:
+        axes[0].plot(eval_steps, ood_losses, linestyle='--', label='OOD Loss')
+        axes[1].plot(eval_steps, ood_losses, linestyle='--', label='OOD Loss')
 
     # if len(bayes_losses) >= 1:
     #     axes[0].plot(range_vec, bayes_losses, linestyle='-', color='burlywood', label='Bayes Loss')
@@ -84,11 +89,45 @@ def get_loss_plots(config, train_results, folder="loss_plots", show=False, verbo
     if show:
         plt.show()
     plt.close()
+
+
+def plot_attn_scores(train_results, config, folder="loss_plots", show=False, log=True):
+    fig, ax = plt.subplots(1, 1, figsize=(6, 6))
     
+    task_name = config.task.name
+
+    range_vec = np.arange(1, min(config.training.eval_iter, 100), 5)
+    range_vec = np.concatenate((range_vec, np.arange(1, config.training.num_epochs+1, config.training.eval_iter)[1:]), axis=0)
+
+    if "eval/pth_score" in train_results["log"].keys():
+        pth_score = train_results["log"]["eval/pth_score"]
+        ax.plot(range_vec, pth_score, linestyle='--', label='PTH Score')
+        if log:
+            ax.set_xscale('log')
+    
+    if "eval/ih_score" in train_results["log"].keys():
+        ih_score = train_results["log"]["eval/ih_score"]
+        ax.plot(range_vec, ih_score, linestyle='--', label='IH Score')
+        if log:
+            ax.set_xscale('log')
+        
+    ax.set_xlabel('Steps')
+    
+
+    ax.set_title('Attention Scores')
+    ax.grid()
+    ax.legend()
+    
+    curr_time = datetime.now().strftime("%Y%m%d_%H%M")
+    image_path = os.path.join(folder, f"attn_scores_{curr_time}.png")
+    plt.savefig(image_path)
+    if show:
+        plt.show()
+    plt.close()
 
 
 def plot_probes(train_results, config, folder="loss_plots", show=False, log=True):
-    print("Probes plots saved at ", folder)
+    # print("Probes plots saved at ", folder)
     probes = train_results["probes"]
     if len(probes) == 0:
         return
@@ -105,18 +144,22 @@ def plot_probes(train_results, config, folder="loss_plots", show=False, log=True
     else:
         fig, ax = plt.subplots(1, 1, figsize=(6*1, 6))
     
+    range_vec = np.arange(1, min(config.training.eval_iter, 100), 5)
+    range_vec = np.concatenate((range_vec, np.arange(1, config.training.num_epochs+1, config.training.eval_iter)[1:]), axis=0)
+    
     for pkey in probes.keys():
         if pkey in ["wk0", "wk1", "wo1", "ff", "emb", "ff_emb", "ff+res", "res"]:
-            ax.plot(range(1, config.training.num_epochs+1, config.training.get_probes), probes[pkey], 
-                        linestyle='-', label=f'{pkey}')
+            ax.plot(range_vec, probes[pkey], 
+                    linestyle='-', label=f'{pkey}')
             if log:
                 ax.set_xscale('log')
             
         elif pkey in ["attn", "ff_icl", "combined_icl", "ff_mem_unif", "ff_mem_true"]:
-            axes[1].plot(range(1, config.training.num_epochs+1, config.training.get_probes), probes[pkey], 
-                         linestyle='-', label=f'{plot_labels[pkey]}')
+            axes[1].plot(range_vec, probes[pkey], 
+                        linestyle='-', label=f'{plot_labels[pkey]}')
             if log:
                 axes[1].set_xscale('log')
+            
     
     ax.set_xlabel('Steps')
     if task_name == "bietti":
@@ -167,7 +210,10 @@ def plot_bigram_icl_risk(config, train_results, folder="loss_plots", show=False)
     
     task_name = config.task.name
     fig, axes = plt.subplots(1, 2, figsize=(6*2, 6))
-    range_vec = range(1, config.training.num_epochs+1, config.training.get_probes)
+    
+    range_vec = np.arange(1, min(config.training.eval_iter, 100), 5)
+    range_vec = np.concatenate((range_vec, np.arange(1, config.training.num_epochs+1, config.training.eval_iter)[1:]), axis=0)
+
     axes[0].plot(range_vec[:len(id_losses_smoothed)], id_losses_smoothed, linestyle='-', label='ID Risk')
     axes[1].plot(range_vec[:len(id_losses_smoothed)], id_losses_smoothed, linestyle='-', label='ID Risk')
     axes[0].plot(range_vec[:len(icl_losses_smoothed)], icl_losses_smoothed, linestyle='--', label='ICL Risk')

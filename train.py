@@ -22,6 +22,14 @@ import pickle
 import wandb
 
 def get_hash(config: ConfigDict) -> str:
+    """
+    Generate a hash for the given configuration.
+    This is used to identify the experiment uniquely.
+    Args:
+        config (ConfigDict): The configuration object.
+    Returns:
+        str: The hash of the configuration.
+    """
     return hashlib.md5(config.to_json(sort_keys=True).encode("utf-8")).hexdigest()
 
 # Train model based on task
@@ -52,6 +60,7 @@ def _init_log() -> dict:
            "baseline": {},
            "eval/loss": [], "eval/step": [], 
            "eval/IDLoss": [], "eval/ICLLoss": [], "eval/OODLoss": [], "eval/CopyError": [],
+           "eval/pth_score": [], "eval/ih_score": [],
            }
     return log
 
@@ -60,7 +69,7 @@ def train_trigger(model, config, verbose=False):
     
     exp_name = f"train_{get_hash(config)}"
     exp_dir = os.path.join(config.work_dir, exp_name)   
-    print("Experiment directory: ", exp_dir) 
+    
     logging.info(f"Train Experiment\nNAME: {exp_name}\nCONFIG:\n{config}")
     
     # Specify the maximum number of epochs to generate in one pass to speedup data generation
@@ -186,27 +195,9 @@ def train_trigger(model, config, verbose=False):
                     "optimizer": optimizer.state_dict(),
                     "step": step,
                     }, os.path.join(checkpoint_path, f"model_{step}.pt"))
+                    
 
-
-            if step % config.training.get_probes == 0:
-                with torch.no_grad():
-                    # collect probes etc.
-                    model.eval()
-                    id_loss, icl_loss, ood_loss, copy_error = trigger_handler(model, eval_batch, eval_mask, probes, probe_batch, 
-                                                                  config, sampler, random_tokens, layer, 
-                                                                  ood_batch, ood_mask, copy_batch, copy_mask)
-                    log["eval/IDLoss"].append(id_loss)
-                    wandb.log({"eval/IDLoss": id_loss}, step=step)
-                    log["eval/ICLLoss"].append(icl_loss)
-                    wandb.log({"eval/ICLLoss": icl_loss}, step=step)
-                    if ood_loss is not None:
-                        log["eval/OODLoss"].append(ood_loss)
-                        wandb.log({"eval/OODLoss": ood_loss}, step=step)
-                    if copy_error is not None:
-                        log["eval/CopyError"].append(copy_error)
-                        wandb.log({"eval/CopyError": copy_error}, step=step)
-
-            if step % config.training.eval_iter == 0:
+            if (step % config.training.eval_iter == 0) or (step < min(config.training.eval_iter, 100) and step % 5 == 0):
                 if verbose:
                     print(f"Step: {step}")
                 log["train/step"].append(step)
@@ -221,7 +212,22 @@ def train_trigger(model, config, verbose=False):
                     log["eval/loss"].append(eval_loss.item())
                     wandb.log({"eval/loss": eval_loss.item()}, step=step)
                     log["eval/step"].append(step)
+
+                    id_loss, icl_loss, ood_loss, copy_error = trigger_handler(model, eval_batch, eval_mask, probes, probe_batch, 
+                                                                  config, sampler, random_tokens, layer, 
+                                                                  ood_batch, ood_mask, copy_batch, copy_mask)
+                    log["eval/IDLoss"].append(id_loss)
+                    wandb.log({"eval/IDLoss": id_loss}, step=step)
+                    log["eval/ICLLoss"].append(icl_loss)
+                    wandb.log({"eval/ICLLoss": icl_loss}, step=step)
+                    if ood_loss is not None:
+                        log["eval/OODLoss"].append(ood_loss)
+                        wandb.log({"eval/OODLoss": ood_loss}, step=step)
+                    if copy_error is not None:
+                        log["eval/CopyError"].append(copy_error)
+                        wandb.log({"eval/CopyError": copy_error}, step=step)
     
+
     os.makedirs(checkpoint_path, exist_ok=True)
     torch.save({
         "model": model.state_dict(), 
@@ -278,7 +284,7 @@ def train_latent(model, config, verbose=False):
 
     # last_token_losses = []
     attn_maps, probes = {}, defaultdict(list)
-    many_ngram_losses = {}
+    # many_ngram_losses = {}
     # bayes_losses = []
     criterion = nn.CrossEntropyLoss() 
     optimizer = torch.optim.AdamW(model.parameters(), 
@@ -290,13 +296,19 @@ def train_latent(model, config, verbose=False):
     is_icl = "icl" in config.task.name
     
     test_data, test_info = sampler.generate(mode="test")
-    print(test_data.shape)
     test_target = test_data[:, 1:].reshape(-1)
     
+    if config.task.ood:
+        ood_batch, _ = sampler.generate(mode="ood")
+        ood_target = ood_batch[:, 1:].reshape(-1)
+    
+    eval_batch, _ = sampler.generate(mode="eval")
+
     
     # Collect ngram losses for baseline comparison
     if config.ngram > 0:
-        
+        print("Evaluating baselines...")
+
         if config.task.name == "latent":
             many_ngramLearnersDict = {i:many_ngramLearners(config, i, sampler) for i in range(config.ngram)}
             for i, learner in many_ngramLearnersDict.items():
@@ -364,7 +376,8 @@ def train_latent(model, config, verbose=False):
             optimizer.step()
             if scheduler: scheduler.step()
             
-            if config.training.get_checkpoints > 0 and step % config.training.get_checkpoints == 0:
+            if config.training.get_checkpoints > 0 and ((step % config.training.get_checkpoints == 0) 
+                                                        or (step < min(config.training.get_checkpoints, 200) and step % 5 == 0)):
                 
                 os.makedirs(checkpoint_path, exist_ok=True)
                 torch.save({
@@ -374,7 +387,7 @@ def train_latent(model, config, verbose=False):
                     }, os.path.join(checkpoint_path, f"model_{step}.pt"))
 
 
-            if step % config.training.eval_iter == 0:
+            if (step % config.training.eval_iter == 0) or (step < min(config.training.eval_iter, 100) and step % 5 == 0):
                 if verbose:
                     print(f"Step: {step}")
                 log["train/step"].append(step)
@@ -387,9 +400,33 @@ def train_latent(model, config, verbose=False):
                     outputs = outputs[:, :-1, :].reshape(-1, config.vocab_size)
                     eval_loss = criterion(outputs, test_target)
                     log["eval/loss"].append(eval_loss.item())
-                    wandb.log({"eval/loss": eval_loss.item()}, step=step)
+                    wandb.log({"eval/IDloss": eval_loss.item()}, step=step)
                     log["eval/step"].append(step)
-            
+                    if config.task.ood:
+                        ood_outputs, _ = model(ood_batch)
+                        ood_outputs = ood_outputs[:, :-1, :].reshape(-1, config.vocab_size)
+                        ood_loss = criterion(ood_outputs, ood_target)
+                        log["eval/OODLoss"].append(ood_loss.item())
+                        wandb.log({"eval/OODLoss": ood_loss.item()}, step=step)
+                    
+                    pth = pth_score(model, eval_batch)
+                    log["eval/pth_score"].append(pth)
+                    wandb.log({"eval/pth_score": pth}, step=step)
+                    ih = ih_score(model, eval_batch, config.device)
+                    log["eval/ih_score"].append(ih)
+                    wandb.log({"eval/ih_score": ih}, step=step)
+                    
+    
+    os.makedirs(checkpoint_path, exist_ok=True)
+    torch.save({
+        "model": model.state_dict(), 
+        "optimizer": optimizer.state_dict(),
+        "step": step,
+        }, os.path.join(checkpoint_path, f"model_final_{step}.pt"))
+    with open(log_path, "w") as f:
+        json.dump(log, f, indent=2)
+
+    print("Training complete.")
             
 
     return get_train_result(log=log, config=config, sampler=sampler, attn_maps=attn_maps, probes=probes)
@@ -405,6 +442,8 @@ def train_model_with_plot(model, config, show=False):
     exp_name = f"train_{get_hash(config)}"
     exp_dir = os.path.join(config.work_dir, exp_name)
 
+    print("Experiment directory: ", exp_dir) 
+
     if os.path.exists(os.path.join(exp_dir, "log.json")):
         print(f"{exp_name} already completed")
         return
@@ -418,6 +457,8 @@ def train_model_with_plot(model, config, show=False):
     get_loss_plots(config, train_results, folder=plot_path, show=show)
     plot_probes(train_results, config, folder=plot_path, show=True, log=False)
     plot_probes(train_results, config, folder=plot_path, show=True, log=True)
+    plot_attn_scores(train_results, config, folder=plot_path, show=True, log=False)
+    plot_attn_scores(train_results, config, folder=plot_path, show=True, log=True)
     plot_bigram_icl_risk(config, train_results, folder=plot_path, show=True)
 
     gif_paths = defaultdict(list)

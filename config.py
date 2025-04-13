@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 import torch
 from typing import Tuple, Optional, Any
-from ml_collections import ConfigDict
+from ml_collections import ConfigDict # DeepMind style config library
 import os
 
 def get_config() -> ConfigDict:
@@ -9,28 +9,37 @@ def get_config() -> ConfigDict:
     config.seq_len = 512
     config.vocab_size = 10
     config.seed = None
-    config.batch_size = 128
+    config.batch_size = 64
     config.eval_size = 512
     config.test_size = 4096
     config.device = "cuda" if torch.cuda.is_available() else "cpu"
     config.work_dir = os.path.join("results", "latent")  # Specify working directory
-    config.ngram = 4  # N-gram order for the task, default is 2
+    config.ngram = 3  # N-gram order for the n-gram learner
     config.wandb = ConfigDict()
     config.wandb.project = "ICL"  # Specify wandb project
+
+    #####################  
+    #    Tasks          #
+    #####################
     
     config.task = ConfigDict()
     config.task.name = "latent"
     config.task.order = 1  # Order of the Markov chain
     config.task.alpha = 1.0  # Dirichlet prior for the transition matrix
-    config.task.cardinality = 1  # Number of random distributions
+    config.task.cardinality = 1  # Number of random distributions, this is for the frm task
     config.task.random_alpha = 1  # Dirichlet prior for random transition
     config.task.dist_name = "finite_dirichlet"  # Distribution for the transition matrix
     config.task.random_order = 1  # Random order for the Markov chain
-    config.task.total_trans = 2  # Total number of transitions to sample
+    config.task.total_trans = 45  # Total number of transitions to sample
     config.task.rho = 0.2  
-    config.task.fixed = False  # Whether to fix the transition matrix
-    config.task.ood = False  # Out-of-distribution flag
+    config.task.fixed = False  # Whether to fix the triggers
+    config.task.ood = True  # Out-of-distribution flag
     
+
+    ######################
+    #     Model          #
+    ######################
+
     config.model = ConfigDict()
     config.model.emb_dim = 64
     config.model.bias = False
@@ -47,14 +56,17 @@ def get_config() -> ConfigDict:
     config.model.pos_max_len = 256  # Maximum length for positional encoding
     config.model.flash = True  # Whether to use flash attention for faster computation
     
+
+    #######################
+    #     Training        #
+    #######################
     
     config.training = ConfigDict()
-    config.training.num_epochs = 20000
-    config.training.learning_rate = 3e-4
-    config.training.eval_iter = 1000
-    config.training.get_probes = 100
+    config.training.num_epochs = 40000
+    config.training.learning_rate = 6e-4
+    config.training.eval_iter = 100
     config.training.get_attn = 1000
-    config.training.get_checkpoints = 1000
+    config.training.get_checkpoints = 500
     config.training.weight_decay = 1e-2
     config.training.freeze_value = False
     config.training.freeze_out = False

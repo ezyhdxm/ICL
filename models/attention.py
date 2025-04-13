@@ -94,7 +94,7 @@ class MultiHeadAttention(nn.Module):
             self.alibi_emb = AliBiPositionalEncoding(self.n_head)
     
 
-    def forward(self, x, get_attn): # x: (B,T,C)
+    def forward(self, x, get_attn=False): # x: (B,T,C)
         batch_size, seq_len, _ = x.size()
         Q = self.query(x).view(batch_size, seq_len, self.n_head, self.head_dim).transpose(1,2) # (B,H,T,D)
         K = self.key(x).view(batch_size, seq_len, self.n_head, self.head_dim).transpose(1,2) # (B,H,T,D)

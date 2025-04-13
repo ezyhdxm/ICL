@@ -4,6 +4,7 @@ from tasks.markov import *
 import pandas as pd
 from itertools import product
 from IPython.display import display
+from tqdm.notebook import trange, tqdm
 
 # Empirical n-gram learner
 class ngramLearner:
@@ -90,15 +91,18 @@ class many_ngramLearners:
         self.config = config
     
     def loss(self):
-        total_trans = self.sampler.trans_matrix.size(0)
+        total_trans = self.sampler.total_trans
+        task_inds = torch.arange(total_trans)
+        if total_trans > 16:
+            task_inds = torch.randperm(total_trans)[:16]
+        
         loss = 0
-        for i in range(total_trans):
+        for i in tqdm(task_inds, leave=False, desc=f"Evaluating Baseline with order {self.order}"):
             ngram_learner = ngramLearner(self.config, self.order, is_icl=False)
-            self.markov_sampler.trans_matrix = self.sampler.trans_matrix[i]
-            batch = self.markov_sampler.generate(1, mode="test")[0].squeeze()
-            ngram_learner.update(batch)
-            loss += ngram_learner.loss(batch).item()
-        return loss / total_trans
+            batch, _ = self.sampler.generate(num_samples=256, mode="eval", task=i)
+            ngram_learner.update(batch[:128])
+            loss += ngram_learner.loss(batch[128:]).item()
+        return loss / len(task_inds)
 
 
 
