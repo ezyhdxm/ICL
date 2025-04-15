@@ -1,6 +1,6 @@
 # Instructions
 
-To run the current ongoing experiments, see notebooks [TriggerMarkov.ipynb](./TriggerMarkov.ipynb) for random triggers, [LatentModel.ipynb](./LatentModel.ipynb) for latent markov models and [Linear.ipynb](./Linear.ipynb) for linear regression. Use [config.py](./config.py) to specify experiment configurations. Experiment results are stored in the [results](./results/) folder, where model checkpoints, plots and experiment configurations can be found. 
+To run the current ongoing experiments, see notebooks [TriggerMarkov.ipynb](./TriggerMarkov.ipynb) for random triggers, [LatentModel.ipynb](./LatentModel.ipynb) for latent markov models and [Linear.ipynb](./Linear.ipynb) for linear regression. Use [config.py](./config.py) to specify experiment configurations. Experiment results are stored in the [results](./results/) folder, where plots and experiment configurations can be found. Model checkpoints are available on [Googl Drive](https://drive.google.com/file/d/1M4gCmQ1z3tdG2Z0PlLsi_MBYFWyieHmj/view?usp=drive_link). 
 
 The structure of this repositary is roughly summarized in the following file tree (might be outdated):
 
