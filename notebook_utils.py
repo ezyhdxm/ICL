@@ -228,7 +228,7 @@ def load_config(config_path):
 # you can use this function to get the list of folders 
 # with the same number of transition matrices.
 
-def get_config(total_trans=None, path=None):
+def get_config(total_trans=None, vocab_size=10, path=None):
     DEFAULT_PATH = os.path.join("results", "latent")
     if path is None:
         path = DEFAULT_PATH
@@ -238,14 +238,15 @@ def get_config(total_trans=None, path=None):
         for folder in os.listdir(path):
             if os.path.isdir(os.path.join(path, folder)):
                 config = load_config(os.path.join(path, folder, "config.json"))
-                total_trans_list.append(config.task.total_trans)
+                if config.vocab_size == vocab_size:
+                    total_trans_list.append(config.task.total_trans)
         pprint(f"You can choose from the following number of total transition matrices: \n {sorted(total_trans_list)}")
     else:
         folder_list = []
         for folder in os.listdir(path):
             if os.path.isdir(os.path.join(path, folder)):
                 config = load_config(os.path.join(path, folder, "config.json"))
-                if config.task.total_trans == total_trans:
+                if (config.task.total_trans == total_trans) and (config.vocab_size == vocab_size):
                     folder_list.append(folder)
         pprint(f"You can choose from the following folders: {folder_list}")
         
@@ -499,7 +500,7 @@ def kl_div_ave(P: torch.Tensor, Q: torch.Tensor) -> float:
 # Phase Transition Plots #
 ##########################
 
-def get_loss_lineplot(task_name, task_ids=None):
+def get_loss_lineplot(task_name, vocab_size=20, task_ids=None):
     folder_path = os.path.join("results", task_name)
     folders = [name for name in os.listdir(folder_path) if os.path.isdir(os.path.join(folder_path, name))]
 
@@ -524,6 +525,9 @@ def get_loss_lineplot(task_name, task_ids=None):
 
         if (task_ids is not None) and (config.task.total_trans not in task_ids):
             continue
+
+        if config.vocab_size != vocab_size:
+            continue
         
         if task_ids is None:
             value = np.log2(config.task.total_trans)
@@ -541,23 +545,27 @@ def get_loss_lineplot(task_name, task_ids=None):
 
     # Customize each subplot
     ax2.set_xscale("log")
-    ax2.set_title("OOD Loss vs Step")
-    ax2.set_xlabel("Step")
+    ax2.set_title("OOD Loss", fontsize=14, fontweight='bold')
+    ax2.set_xlabel("Training Steps", fontsize=11, fontweight='bold')
+    ax2.tick_params(axis='x', labelsize=11)
 
     ax1.set_xscale("log")
-    ax1.set_title("ID Loss vs Step")
-    ax1.set_xlabel("Step")
-    ax1.set_ylabel("Loss")
+    ax1.set_title("ID Loss", fontsize=14, fontweight='bold')
+    ax1.set_xlabel("Training Steps", fontsize=11, fontweight='bold')
+    ax1.set_ylabel("Cross Entropy Loss", fontsize=11, fontweight='bold')
+    ax1.tick_params(axis='x', labelsize=11)
+    ax1.tick_params(axis='y', labelsize=11)
 
     plt.subplots_adjust(wspace=0.02)  # Try 0 for zero gap
     # Add colorbar to the whole figure
     cbar = fig.colorbar(sm, ax=[ax1, ax2], orientation='vertical')
-    cbar.set_label("Total Transitions")
+    cbar.set_label("Number of Mixtures", fontsize=12)
+    cbar.ax.tick_params(labelsize=11)
 
     if task_ids is None:
-        plt.savefig(os.path.join(folder_path, "loss_lineplots.png"))
+        plt.savefig(os.path.join(folder_path, f"loss_lineplots_{vocab_size}.png"))
     else:
-        plt.savefig(os.path.join(folder_path, f"loss_lineplots_{hash_array(task_ids)}.png"))
+        plt.savefig(os.path.join(folder_path, f"loss_lineplots_{hash_array(task_ids)}_{vocab_size}.png"))
     plt.show()
 
 
@@ -709,7 +717,7 @@ def get_loss_heatmap_dual(task_name, task_ids=None, log_scale=False):
 
 
 
-def get_attn_score_lineplot(task_name, task_ids=None):
+def get_attn_score_lineplot(task_name, vocab_size=20, task_ids=None):
     folder_path = os.path.join("results", task_name)
     folders = [name for name in os.listdir(folder_path) if os.path.isdir(os.path.join(folder_path, name))]
     # Create a 1x2 subplot layout
@@ -732,6 +740,9 @@ def get_attn_score_lineplot(task_name, task_ids=None):
         config = load_config(config_path)
 
         if (task_ids is not None) and (config.task.total_trans not in task_ids):
+            continue
+
+        if config.vocab_size != vocab_size:
             continue
 
         if task_ids is None:
@@ -770,7 +781,7 @@ def get_attn_score_lineplot(task_name, task_ids=None):
     plt.show()
 
 
-def kl_plot(model, sampler, task=None, num_samples=100):
+def kl_plot(model, sampler, task=None, num_samples=100, pos=None):
     if task == None:
         batch, _, tasks = sampler.generate(mode="testing", task=task, num_samples=num_samples)
         B,T = batch.shape
@@ -792,6 +803,9 @@ def kl_plot(model, sampler, task=None, num_samples=100):
         
     kl_losses = F.kl_div(nn.Softmax(dim=-1)(model(batch)[0]).log(), trans_probs, reduction="none").sum(dim=-1).detach().cpu().numpy() 
     
+    if pos is not None:
+        kl_losses = kl_losses[:, :pos]
+
     # Create a 1D NumPy array
     arr = np.arange(kl_losses.shape[1])
     
@@ -800,7 +814,7 @@ def kl_plot(model, sampler, task=None, num_samples=100):
     
     # Plot the array
     plt.plot(arr, mean_losses)
-    plt.fill_between(arr, np.maximum(mean_losses - std_losses, 0), mean_losses + 2*std_losses, color='blue', alpha=0.3, label="Mean ± 3 std")
+    plt.fill_between(arr, np.maximum(mean_losses - 2*std_losses, 0), mean_losses + 2*std_losses, color='blue', alpha=0.3, label="Mean ± 2 std")
     
     plt.grid()
     if task is not None:
@@ -816,3 +830,252 @@ def kl_plot(model, sampler, task=None, num_samples=100):
 
 
 
+def predictive_distribution_batched(x_seq_batch, transition_matrices):
+    """
+    Computes batched Pr(x_{t+1} | x_{1:t}) in log-space for multiple sequences.
+
+    Args:
+        x_seq_batch: LongTensor of shape (B, T), each row is a sequence x_{1:t}
+        transition_matrices: FloatTensor of shape (K, N, N), each is a transition matrix P^{(k)}
+
+    Returns:
+        pred_probs: Tensor of shape (B, N), predictive distribution for x_{t+1}
+    """
+    B, T = x_seq_batch.shape
+    K, N, _ = transition_matrices.shape
+
+    # Step 1: Compute log_weights[b, k] = log-likelihood of x_{1:T} under model k
+    # We'll gather P_{x_{tau-1}, x_tau}^{(k)} for each tau and compute log-product
+    log_P = torch.log(torch.clamp(transition_matrices, min=1e-40))  # (K, N, N)
+
+    # Expand for indexing
+    x_prev = x_seq_batch[:, :-1]  # (B, T-1)
+    x_curr = x_seq_batch[:, 1:]   # (B, T-1)
+
+    # Gather transition probabilities for each model k
+    # log_probs: (B, K, T-1)
+    log_probs = []
+    for k in range(K):
+        # log_P_k[x_prev, x_curr] → (B, T-1)
+        log_Pk = log_P[k]  # (N, N)
+        log_prob_k = log_Pk[x_prev, x_curr]  # batch-wise indexing
+        log_probs.append(log_prob_k.unsqueeze(1))  # shape (B, 1, T-1)
+
+    log_probs = torch.cat(log_probs, dim=1)  # (B, K, T-1)
+    log_weights = torch.sum(log_probs, dim=2)  # (B, K)
+
+    # Normalize: log_softmax over K models
+    log_weights = F.log_softmax(log_weights, dim=1)  # (B, K)
+
+    # Step 2: Compute log predictive probabilities for each next state j
+    x_t = x_seq_batch[:, -1]  # (B,)
+    log_pred = torch.full((B, N), -float('inf'), device=x_seq_batch.device)
+
+    for k in range(K):
+        # log_P_k[x_t, :] shape: (B, N)
+        log_Pk = log_P[k]  # (N, N)
+        log_Pk_xt = log_Pk[x_t]  # (B, N)
+        # Add log weight
+        log_term = log_weights[:, k].unsqueeze(1) + log_Pk_xt  # (B, N)
+        log_pred = torch.logaddexp(log_pred, log_term)
+
+    # Final probability
+    pred_probs = torch.exp(log_pred)  # (B, N)
+    return pred_probs
+
+
+def bayes_kl_plot(sampler, task=None, num_samples=2000, low=1, high=60):
+    if task is None:
+        batch, _, latents = sampler.generate(mode="testing", num_samples=num_samples, task=task)
+    else:
+        batch, _ = sampler.generate(mode="testing", num_samples=num_samples, task=task)
+        latents = task
+    
+    mean_losses = np.zeros(high-low)
+    std_losses = np.zeros(high-low)
+    
+    for pos in range(low, high):
+        pred_probs = predictive_distribution_batched(batch[:,:pos], sampler.trans_mat)
+        kl_div = F.kl_div(pred_probs.log(), sampler.trans_mat[latents, batch[:,pos-1]], reduction="none").sum(dim=-1)
+        mean_losses[pos-low] = kl_div.mean().detach().cpu().numpy()
+        std_losses[pos-low] = kl_div.std().detach().cpu().numpy()
+    
+    arr = np.arange(low, high)
+    plt.plot(arr, mean_losses)
+    plt.fill_between(arr, np.maximum(mean_losses - 2*std_losses, 0), mean_losses + 2*std_losses, color='blue', alpha=0.3, label="Mean ± 2 std")
+    
+    plt.grid()
+    if task is not None:
+        plt.title(f"Average KL-divergence for task {task}")
+    else:
+        plt.title("Average KL-divergence over all tasks")
+    plt.xlabel("Positions")
+    plt.ylabel("KL-divergence")
+    plt.legend()
+    plt.tight_layout()
+    
+    plt.show()
+
+
+def emp_bigram_plot(sampler, task=None, num_samples=2000, low=1, high=200):
+    if task is None:
+        batch, _, latents = sampler.generate(mode="testing", num_samples=num_samples, task=task)
+    else:
+        batch, _ = sampler.generate(mode="testing", num_samples=num_samples, task=task)
+        latents = task
+
+    batch_size, seq_len = batch.shape
+    trans_mat_est = torch.ones((batch_size, sampler.num_states, sampler.num_states), device=batch.device)
+    next_states = batch[:, 1:]  # (B, T-1)
+
+    values = torch.ones(batch_size, dtype=torch.float, device=batch.device)  # Same size as positions
+
+    mean_losses = np.zeros(high-low)
+    std_losses = np.zeros(high-low)
+    
+    for t in range(low):
+        trans_mat_est.index_put_((torch.arange(batch_size), batch[:,t], next_states[:,t]), values, accumulate=True)
+
+    for pos in range(low, high):
+        pred_probs = trans_mat_est / trans_mat_est.sum(dim=-1, keepdim=True)
+        trans_mat_est.index_put_((torch.arange(batch_size), batch[:,pos], next_states[:,pos]), values, accumulate=True)
+        
+        kl_div = F.kl_div(pred_probs[torch.arange(batch_size),
+                                     batch[:,pos]].log(), sampler.trans_mat[latents, batch[:,pos]], reduction="none").sum(dim=-1)
+        mean_losses[pos-low] = kl_div.mean().detach().cpu().numpy()
+        std_losses[pos-low] = kl_div.std().detach().cpu().numpy()
+    
+    arr = np.arange(low, high)
+    plt.plot(arr, mean_losses)
+    plt.fill_between(arr, np.maximum(mean_losses - 2*std_losses, 0), mean_losses + 2*std_losses, color='blue', alpha=0.3, label="Mean ± 2 std")
+    
+    plt.grid()
+    if task is not None:
+        plt.title(f"Average KL-divergence for task {task}")
+    else:
+        plt.title("Average KL-divergence over all tasks")
+    plt.xlabel("Positions")
+    plt.ylabel("KL-divergence")
+    plt.legend()
+    plt.tight_layout()
+    
+    plt.show()
+
+
+
+
+
+def all_kl_plot(vocab_size, total_trans, task=None, num_samples=2000, low=1, high=200, truth=True):
+    folder_name = get_config(vocab_size=vocab_size, total_trans=total_trans)
+    if len(folder_name) > 0:
+        model, sampler, _ = load_everything("latent", folder_name[0])
+    else:
+        return
+    if task is None:
+        batch, _, tasks = sampler.generate(mode="testing", task=task, num_samples=num_samples)
+        B,T = batch.shape
+        N = sampler.num_states
+        tasks_exp = tasks[:, None].expand(B, T)        # shape: (B, T)
+        batch_exp = batch                              # shape: (B, T)
+        
+        # Flatten for advanced indexing
+        flat_tasks = tasks_exp.reshape(-1)             # (B*T,)
+        flat_batch = batch_exp.reshape(-1)             # (B*T,)
+        
+        # Gather rows from trans_mat using tasks and batch
+        selected = sampler.trans_mat[flat_tasks, flat_batch]   # shape: (B*T, N)
+        
+        trans_probs = selected.view(B, T, N)
+    else:
+        batch, _ = sampler.generate(mode="testing", num_samples=num_samples, task=task)
+        tasks = task
+        trans_probs = sampler.trans_mat[task][batch]
+    
+    cmap = plt.get_cmap('tab10')
+        
+    model_pred_probs = nn.Softmax(dim=-1)(model(batch)[0]) # (B, T, N)
+    trans_kl_losses = F.kl_div(model_pred_probs.log(), trans_probs, reduction="none").sum(dim=-1).detach().cpu().numpy() # (B, T)
+    unif_probs = torch.ones_like(model_pred_probs) / sampler.num_states # (B, T, N)
+    unif_kl_losses = F.kl_div(model_pred_probs.log(), unif_probs, reduction="none").sum(dim=-1).detach().cpu().numpy() # (B, T)
+    unif_kl_losses = unif_kl_losses[:, (low-1):(high-1)]
+    
+    trans_kl_losses = trans_kl_losses[:, (low-1):(high-1)]
+
+    # Create a 1D NumPy array
+    arr = np.arange(low, high)
+    
+    trans_mean_losses = np.mean(trans_kl_losses, axis=0)
+    trans_std_losses = np.std(trans_kl_losses, axis=0)
+
+    unif_mean_losses = np.mean(unif_kl_losses, axis=0)
+    unif_std_losses = np.std(unif_kl_losses, axis=0)
+
+    batch_size, seq_len = batch.shape
+    emp_trans_mat_est = torch.ones((batch_size, sampler.num_states, sampler.num_states), device=batch.device)
+    next_states = batch[:, 1:]  # (B, T-1)
+
+    values = torch.ones(batch_size, dtype=torch.float, device=batch.device)  # Same size as positions
+
+    emp_mean_losses = np.zeros(high-low)
+    emp_std_losses = np.zeros(high-low)
+
+    bayes_mean_losses = np.zeros(high-low)
+    bayes_std_losses = np.zeros(high-low)
+    
+    for t in range(low):
+        emp_trans_mat_est.index_put_((torch.arange(batch_size), batch[:,t], next_states[:,t]), values, accumulate=True)
+
+    for pos in range(low, high):
+        emp_probs = emp_trans_mat_est / emp_trans_mat_est.sum(dim=-1, keepdim=True) # 
+        emp_trans_mat_est.index_put_((torch.arange(batch_size), batch[:,pos], next_states[:,pos]), values, accumulate=True)
+
+        kl_div = F.kl_div(model_pred_probs[:, pos].log(), 
+                          emp_probs[torch.arange(batch_size), batch[:,pos]],
+                          reduction="none").sum(dim=-1).detach().cpu().numpy()
+        
+        emp_mean_losses[pos-low] = kl_div.mean()
+        emp_std_losses[pos-low] = kl_div.std()
+
+        if (total_trans < 300) and truth:
+
+            bayes_probs = predictive_distribution_batched(batch[:,:pos], sampler.trans_mat)
+            kl_div = F.kl_div(model_pred_probs[:, pos-1].log(), 
+                            bayes_probs, reduction="none").sum(dim=-1)
+            bayes_mean_losses[pos-low] = kl_div.mean().detach().cpu().numpy()
+            bayes_std_losses[pos-low] = kl_div.std().detach().cpu().numpy()
+    
+    arr = np.arange(low, high)
+
+    plt.plot(arr, emp_mean_losses, color=cmap(0))
+    plt.fill_between(arr, np.maximum(emp_mean_losses - emp_std_losses, 0), 
+                     emp_mean_losses + emp_std_losses, color=cmap(0), 
+                     alpha=0.3, label="Emp Mean ± std")
+
+    if truth:
+        plt.plot(arr, trans_mean_losses, color=cmap(1))
+        plt.fill_between(arr, np.maximum(trans_mean_losses - trans_std_losses, 0), 
+                        trans_mean_losses + trans_std_losses, color=cmap(1), 
+                        alpha=0.3, label="Truth Mean ± std")
+    
+    if (total_trans < 300) and truth:
+        plt.plot(arr, bayes_mean_losses, color=cmap(2))
+        plt.fill_between(arr, np.maximum(bayes_mean_losses - bayes_std_losses, 0), 
+                        bayes_mean_losses + bayes_std_losses, color=cmap(2), 
+                        alpha=0.3, label="Bayes Mean ± std")
+    
+    plt.plot(arr, unif_mean_losses, color=cmap(3))
+    plt.fill_between(arr, np.maximum(unif_mean_losses - unif_std_losses, 0),
+                     unif_mean_losses + unif_std_losses, color=cmap(3),
+                     alpha=0.3, label="Uniform Mean ± std")
+    
+    plt.grid()
+    if task is not None:
+        plt.title(f"Average KL-divergence for task {task} (Total: {sampler.total_trans})")
+    else:
+        plt.title(f"Average KL-divergence over all tasks (Total: {sampler.total_trans})")
+    plt.xlabel("Positions")
+    plt.ylabel("KL-divergence")
+    plt.legend()
+    plt.tight_layout()
+    
+    plt.show()

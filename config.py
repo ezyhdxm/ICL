@@ -7,7 +7,7 @@ import os
 def get_config() -> ConfigDict:
     config = ConfigDict()
     config.seq_len = 512
-    config.vocab_size = 10
+    config.vocab_size = 40
     config.seed = None
     config.batch_size = 64
     config.eval_size = 512
@@ -62,7 +62,7 @@ def get_config() -> ConfigDict:
     #######################
     
     config.training = ConfigDict()
-    config.training.num_epochs = 40000
+    config.training.num_epochs = 100000
     config.training.learning_rate = 6e-4
     config.training.eval_iter = 100
     config.training.get_attn = 1000
