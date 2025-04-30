@@ -4,10 +4,11 @@ from typing import Tuple, Optional, Any
 from ml_collections import ConfigDict # DeepMind style config library
 import os
 
+
 def get_config() -> ConfigDict:
     config = ConfigDict()
     config.seq_len = 512
-    config.vocab_size = 40
+    config.vocab_size = 6
     config.seed = None
     config.batch_size = 64
     config.eval_size = 512
@@ -25,15 +26,19 @@ def get_config() -> ConfigDict:
     config.task = ConfigDict()
     config.task.name = "latent"
     config.task.order = 1  # Order of the Markov chain
-    config.task.alpha = 1.0  # Dirichlet prior for the transition matrix
+    config.task.alpha = 0.5  # Dirichlet prior for the transition matrix
+    config.task.ood = True  # Out-of-distribution flag
+    config.task.total_trans = 45  # Total number of transitions to sample
+    config.task.stationary = True # Whether to use sampled stationary distribution
+
+    # configurations for random triggers
     config.task.cardinality = 1  # Number of random distributions, this is for the frm task
     config.task.random_alpha = 1  # Dirichlet prior for random transition
     config.task.dist_name = "finite_dirichlet"  # Distribution for the transition matrix
     config.task.random_order = 1  # Random order for the Markov chain
-    config.task.total_trans = 45  # Total number of transitions to sample
     config.task.rho = 0.2  
     config.task.fixed = False  # Whether to fix the triggers
-    config.task.ood = True  # Out-of-distribution flag
+    
     
 
     ######################
@@ -62,7 +67,7 @@ def get_config() -> ConfigDict:
     #######################
     
     config.training = ConfigDict()
-    config.training.num_epochs = 100000
+    config.training.num_epochs = 10000
     config.training.learning_rate = 6e-4
     config.training.eval_iter = 100
     config.training.get_attn = 1000

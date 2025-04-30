@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 from typing import Tuple
+from tasks.latent_utils import generate_markov_chains
 
 import pandas as pd
 from itertools import product
@@ -11,6 +12,8 @@ from collections import defaultdict
 # config specifies the number of different transitions
 # each time, we randomly sample a transition matrix to use
 
+
+
 class LatentMarkov:
     def __init__(self, config):
         self.seq_len = config.seq_len
@@ -19,6 +22,14 @@ class LatentMarkov:
         self.eval_size = config.eval_size
         self.test_size = config.test_size
         self.device = config.device
+        if 'stationary' in config.task: # To be compatible with the old config
+            self.random_stationary = config.task.stationary # Whether to use sampled stationary distribution
+        else:
+            self.random_stationary = False 
+        if self.random_stationary: assert config.task.order == 1, "Order must be 1 for random stationary distribution in current implementation"
+        
+        self.alpha = config.task.alpha # Dirichlet prior for the transition matrix
+        self.seed = config.seed # Seed for random number generation
 
         self.total_trans = config.task.total_trans # Total number of transition matrices
         self.order = config.task.order # Order of the Markov chain
@@ -29,8 +40,16 @@ class LatentMarkov:
         self.powers = (self.num_states ** torch.arange(self.order - 1, -1, -1, device=self.device)).long()
         
         if self.total_trans > 0:
-            self.trans_mat = self.dirichlet_dist.sample((self.total_trans, self.num_states_order,))  # Shape: (topics, num_states_order, num_states)
-            self.trans_mat /= self.trans_mat.sum(dim=-1, keepdim=True)
+            if self.random_stationary is False:
+                self.trans_mat = self.dirichlet_dist.sample((self.total_trans, self.num_states_order,))  # Shape: (topics, num_states_order, num_states)
+                self.trans_mat /= self.trans_mat.sum(dim=-1, keepdim=True)
+                self.stationary = None
+            else:
+                self.trans_mat, self.stationary = generate_markov_chains(self.total_trans, 
+                                                                         self.num_states, 
+                                                                         self.alpha, 
+                                                                         device=self.device,
+                                                                         seed=self.seed)  # Shape: (topics, num_states_order, num_states)
 
     def print_trans_mat(self, task_id):
         '''
@@ -44,8 +63,10 @@ class LatentMarkov:
         display(df)
     
     # generate samples from the model
-    def generate(self, epochs=1, mode:str="train",
-                 task=None, num_samples=None)-> Tuple[torch.Tensor, torch.Tensor]:
+    def generate(self, 
+                 epochs=1, mode:str="train",
+                 task=None, num_samples=None, 
+                 return_trans_mat=False)-> Tuple[torch.Tensor, torch.Tensor]:
         if mode == "train":
             num_samples = num_samples if num_samples is not None else self.batch_size 
         elif mode == "test":
@@ -64,9 +85,18 @@ class LatentMarkov:
 
         if mode in ["train", "test", "testing", "eval"]:
             trans_mat = self.trans_mat[self.latent] # Shape: (num_samples, num_states_order, num_states)
+        
         elif (mode == "ood") or (self.total_trans == 0):
-            trans_mat = self.dirichlet_dist.sample((num_samples, self.num_states_order,))  # Shape: (num_samples, num_states_order, num_states)
-            trans_mat /= trans_mat.sum(dim=-1, keepdim=True)
+            if self.random_stationary is False:
+                trans_mat = self.dirichlet_dist.sample((num_samples, self.num_states_order,))  # Shape: (num_samples, num_states_order, num_states)
+                trans_mat /= trans_mat.sum(dim=-1, keepdim=True)
+                stationary = None
+            else:
+                trans_mat, stationary = generate_markov_chains(num_samples,
+                                                               self.num_states, 
+                                                               self.alpha, 
+                                                               device=self.device,
+                                                               seed=self.seed)
 
         # Initialize the samples tensor
         samples = torch.zeros((num_samples, self.seq_len), dtype=torch.long, device=self.device)
@@ -98,6 +128,10 @@ class LatentMarkov:
 
         if mode == "testing" and task is None:
             return samples, probs, self.latent
+        
+        if mode == "ood" and return_trans_mat:
+            return samples, probs, trans_mat, stationary
+
 
         return samples, probs
 
@@ -129,37 +163,3 @@ class LatentMarkov:
             unigram_stats[i] = torch.bincount(samples.flatten(), minlength=self.num_states).float() / num_samples / self.seq_len
         
         return unigram_stats
-    
-    def modified(self, latent_old, latent_new, token):
-        old_trans_mat = self.trans_mat.clone()
-        self.trans_mat[latent_old, token] = self.trans_mat[latent_new, token]
-        num_samples = 1
-        
-        latent = latent_old
-        
-        print("Latent variable: ", latent)
-        # Initialize the samples tensor
-        samples = torch.zeros((num_samples, self.seq_len), dtype=torch.long, device=self.device)
-        
-        # Initialize the state (randomly choose starting states for each sequence)
-        state = torch.randint(high=self.num_states, size=(num_samples, self.order), device=self.device)
-        samples[:, :self.order] = state
-            
-        for t in range(self.order, self.seq_len):
-            state_indices = torch.sum(state*self.powers, dim=1)
-            probs = self.trans_mat[latent][state_indices]  # Shape: (num_samples, num_states)
-            
-            # Sample the next states for the entire batch
-            next_states = torch.multinomial(probs, num_samples=1).squeeze(1)
-            
-            # Update the sequence with the sampled next states
-            samples[:, t] = next_states
-            
-            # Update the state window (shift left and append the new state)
-            # state = torch.cat([state[:, 1:], next_states.unsqueeze(1)], dim=1)
-            state[:, :-1] = state[:, 1:].clone()  # Shift left
-            state[:, -1] = next_states    # Append new state
-            
-        self.trans_mat = old_trans_mat
-
-        return samples, probs

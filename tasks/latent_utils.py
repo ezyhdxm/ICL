@@ -184,3 +184,64 @@ def get_ood_id_icl(path, alphas, verbose=True):
             ngram_checker(train_results_ckpt, alpha, verbose=True)
     
     return id_results, ood_results, check_results
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+def sample_bounded_pi_batch(total_trans, num_states, lower=1.0, upper=3.0, device="cpu", seed=None):
+    if seed is not None:
+        torch.manual_seed(seed)
+    x = torch.rand(total_trans, num_states, device=device) * (upper - lower) + lower  # Uniform in [1,3]
+    pi_batch = x / x.sum(dim=1, keepdim=True)  # Normalize along states
+    return pi_batch
+
+def sample_pi_batch(total_trans, num_states, device="cpu", alpha=0.5, seed=None):
+    if seed is not None:
+        torch.manual_seed(seed)
+    
+    if isinstance(alpha, float) or isinstance(alpha, int):
+        alpha = torch.ones(num_states, device=device) * alpha
+    else:
+        alpha = torch.tensor(alpha, dtype=torch.float, device=device)
+    pi_batch = torch.distributions.dirichlet.Dirichlet(alpha).sample((total_trans,))
+    pi_batch = pi_batch / pi_batch.sum(dim=-1, keepdim=True)  # Normalize to sum to 1
+    return pi_batch
+
+def generate_markov_chains(total_trans, num_states, alpha, device="cpu", seed=None):
+    if seed is not None:
+        torch.manual_seed(seed)
+    
+    pi = sample_pi_batch(total_trans, num_states, device=device, alpha=alpha, seed=seed)
+    alpha_vec = torch.ones(num_states, device=device) * alpha
+    dirichlet = torch.distributions.dirichlet.Dirichlet(alpha_vec)
+    Q = dirichlet.sample((total_trans, num_states))  # Shape: (total_trans, num_states, num_states)
+
+    Q = Q / Q.sum(dim=-1, keepdim=True)  # Normalize to sum to 1
+
+    pi_row = pi.unsqueeze(1) # (total_trans, 1, num_states)
+    pi_col = pi.unsqueeze(2) # (total_trans, num_states, 1)
+    Q_T = Q.transpose(1,2) # (total_trans, num_states, num_states)
+
+    ratio = (pi_row * Q_T) / (pi_col * Q + 1e-12)
+    accept = torch.minimum(torch.ones_like(ratio), ratio)
+
+    P = Q * accept
+
+    P = P * (1 - torch.eye(num_states, device=device).unsqueeze(0))
+    P_diag = 1.0 - P.sum(dim=2)
+    P = P + torch.diag_embed(P_diag)
+
+    return P, pi

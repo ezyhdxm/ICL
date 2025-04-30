@@ -228,7 +228,9 @@ def load_config(config_path):
 # you can use this function to get the list of folders 
 # with the same number of transition matrices.
 
-def get_config(total_trans=None, vocab_size=10, path=None):
+def get_config(total_trans=None, vocab_size=10, path=None, 
+               seq_len=None, hidden_dim=None, alpha=None, 
+               stationary=None):
     DEFAULT_PATH = os.path.join("results", "latent")
     if path is None:
         path = DEFAULT_PATH
@@ -238,7 +240,19 @@ def get_config(total_trans=None, vocab_size=10, path=None):
         for folder in os.listdir(path):
             if os.path.isdir(os.path.join(path, folder)):
                 config = load_config(os.path.join(path, folder, "config.json"))
-                if config.vocab_size == vocab_size:
+                flag = config.vocab_size == vocab_size
+                if seq_len is not None:
+                    flag = flag and (config.seq_len == seq_len)
+                if hidden_dim is not None:
+                    flag = flag and (config.model.emb_dim == hidden_dim)
+                if alpha is not None:
+                    flag = flag and (config.task.alpha == alpha)
+                if stationary is not None:
+                    if "stationary" in config.task:
+                        flag = flag and (config.task.stationary == stationary)
+                    else:
+                        flag = flag and (stationary is False)
+                if flag:
                     total_trans_list.append(config.task.total_trans)
         pprint(f"You can choose from the following number of total transition matrices: \n {sorted(total_trans_list)}")
     else:
@@ -246,7 +260,19 @@ def get_config(total_trans=None, vocab_size=10, path=None):
         for folder in os.listdir(path):
             if os.path.isdir(os.path.join(path, folder)):
                 config = load_config(os.path.join(path, folder, "config.json"))
-                if (config.task.total_trans == total_trans) and (config.vocab_size == vocab_size):
+                flag = (config.task.total_trans == total_trans) and (config.vocab_size == vocab_size)
+                if seq_len is not None:
+                    flag = flag and (config.seq_len == seq_len)
+                if hidden_dim is not None:
+                    flag = flag and (config.model.emb_dim == hidden_dim)
+                if alpha is not None:
+                    flag = flag and (config.task.alpha == alpha)
+                if stationary is not None:
+                    if "stationary" in config.task:
+                        flag = flag and (config.task.stationary == stationary)
+                    else:
+                        flag = flag and (stationary is False)
+                if flag:
                     folder_list.append(folder)
         pprint(f"You can choose from the following folders: {folder_list}")
         
@@ -495,12 +521,85 @@ def kl_div_ave(P: torch.Tensor, Q: torch.Tensor) -> float:
     return (kl * mu).sum(dim=-1).cpu().item() # Average over the rows
 
 
+def compute_stationary_distributions(P_batch):
+    """
+    P_batch: Tensor of shape (M, n, n), batch of transition matrices
+    Returns:
+        pi_batch: Tensor of shape (M, n), batch of stationary distributions
+    """
+    M, n, _ = P_batch.shape
+    pi_batch = []
+
+    for m in range(M):
+        P = P_batch[m]  # (n, n)
+        # Transpose because we solve right eigenvector of P^T
+        eigenvalues, eigenvectors = torch.linalg.eig(P.T)
+        # Find the eigenvector corresponding to eigenvalue 1
+        idx = torch.argmin(torch.abs(eigenvalues - 1))
+        pi = eigenvectors[:, idx].real  # take real part, just in case
+        pi = pi / pi.sum()  # normalize to sum to 1
+        pi = torch.clamp(pi, min=0.0)   # Remove tiny negative values due to numerical error
+        pi = pi / pi.sum()              # Normalize again after clamping
+        pi_batch.append(pi)
+
+    pi_batch = torch.stack(pi_batch, dim=0)
+    return pi_batch
+
+def pairwise_kl_divergence(P_batch, pi_batch=None):
+    """
+    P_batch: Tensor of shape (M, n, n), transition matrices
+    pi_batch: Tensor of shape (M, n), stationary distributions
+    Returns:
+        KL matrix of shape (M, M) where (i,j) is KL(P[i] || P[j]) weighted by pi[i]
+    """
+    if pi_batch is None:
+        pi_batch = compute_stationary_distributions(P_batch)
+
+    M, n, _ = P_batch.shape
+    log_P_batch = torch.log(P_batch + 1e-12)  # To avoid log(0)
+    
+    kl_matrix = torch.zeros(M, M)
+
+    for i in range(M):
+        for j in range(M):
+            kl_per_row = F.kl_div(
+                log_P_batch[i],  # log(P^{(i)}(i,j))
+                P_batch[j],      # P^{(j)}(i,j)
+                reduction='none'
+            ).sum(dim=-1)  # sum over j for each i
+            kl = (pi_batch[i] * kl_per_row).sum()  # weighted by pi^{(i)}(i)
+            kl_matrix[i, j] = kl.item()
+    
+    return kl_matrix
+
+def pairwise_kl_divergence_stationary(pi_batch, P_batch=None):
+    """
+    pi_batch: Tensor of shape (M, n), batch of stationary distributions
+    Returns:
+        KL matrix of shape (M, M) where (i,j) = KL(pi[i] || pi[j])
+    """
+    if pi_batch is None and P_batch is not None:
+        pi_batch = compute_stationary_distributions(P_batch)
+    M, n = pi_batch.shape
+    log_pi = torch.log(pi_batch + 1e-12)  # shape (M, n), add epsilon for numerical stability
+
+    kl_matrix = torch.zeros(M, M)
+
+    for i in range(M):
+        for j in range(M):
+            kl = (pi_batch[i] * (log_pi[i] - log_pi[j])).sum()
+            kl_matrix[i, j] = kl.item()
+
+    return kl_matrix
+
 
 ##########################
 # Phase Transition Plots #
 ##########################
 
-def get_loss_lineplot(task_name, vocab_size=20, task_ids=None):
+def get_loss_lineplot(task_name, vocab_size=20, task_ids=None, 
+                      alpha=1.0, seq_len=512, hidden_dim=64, stationary=False):
+    
     folder_path = os.path.join("results", task_name)
     folders = [name for name in os.listdir(folder_path) if os.path.isdir(os.path.join(folder_path, name))]
 
@@ -508,13 +607,9 @@ def get_loss_lineplot(task_name, vocab_size=20, task_ids=None):
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5), sharey=True)  # adjust figsize as needed
 
     # Define normalization and colormap
-    if task_ids is None:
-        norm = mcolors.Normalize(vmin=0, vmax=13)
-    else:
-        norm = mcolors.Normalize(vmin=min(task_ids), vmax=max(task_ids))
-    cmap = plt.get_cmap('plasma')
-    sm = cm.ScalarMappable(cmap=cmap, norm=norm)
-    sm.set_array([])
+
+    plot_ids = []
+    plot_paths = []
 
     for i in range(len(folders)):
         result_path = os.path.join(folder_path, folders[i])
@@ -523,12 +618,39 @@ def get_loss_lineplot(task_name, vocab_size=20, task_ids=None):
         log_data = load_log(log_path)
         config = load_config(config_path)
 
-        if (task_ids is not None) and (config.task.total_trans not in task_ids):
-            continue
+        if (task_ids is not None) and (config.task.total_trans not in task_ids): continue
 
-        if config.vocab_size != vocab_size:
+        if config.vocab_size != vocab_size: continue
+
+        if config.task.alpha != alpha: continue
+
+        if config.seq_len != seq_len: continue
+
+        if config.model.emb_dim != hidden_dim: continue
+
+        if "stationary" in config.task:
+            if config.task.stationary != stationary: continue
+        elif stationary:
             continue
         
+        plot_ids.append(config.task.total_trans)
+        plot_paths.append(result_path)
+    
+    plot_ids = np.array(plot_ids)
+    if task_ids is None:
+        norm = mcolors.Normalize(vmin=np.log2(min(plot_ids)), vmax=np.log2(max(plot_ids)))
+    else:
+        norm = mcolors.Normalize(vmin=min(plot_ids), vmax=max(plot_ids))
+    cmap = plt.get_cmap('plasma')
+    sm = cm.ScalarMappable(cmap=cmap, norm=norm)
+    sm.set_array([])
+
+    for path in plot_paths:
+        log_path = os.path.join(path, "log.json")
+        config_path = os.path.join(path, "config.json")
+        log_data = load_log(log_path)
+        config = load_config(config_path)
+
         if task_ids is None:
             value = np.log2(config.task.total_trans)
         else:
@@ -559,16 +681,19 @@ def get_loss_lineplot(task_name, vocab_size=20, task_ids=None):
     plt.subplots_adjust(wspace=0.02)  # Try 0 for zero gap
     # Add colorbar to the whole figure
     cbar = fig.colorbar(sm, ax=[ax1, ax2], orientation='vertical')
-    cbar.set_label("Number of Mixtures", fontsize=12)
+    if task_ids is None:
+        cbar.set_label("Log Number of Mixtures", fontsize=12)
+    else:
+        cbar.set_label("Number of Mixtures", fontsize=12)
     cbar.ax.tick_params(labelsize=11)
 
     if task_ids is None:
-        plt.savefig(os.path.join(folder_path, f"loss_lineplots_{vocab_size}.png"))
+        plt.savefig(os.path.join(folder_path, f"loss_lineplots_{vocab_size}_{alpha}.png"))
     else:
-        plt.savefig(os.path.join(folder_path, f"loss_lineplots_{hash_array(task_ids)}_{vocab_size}.png"))
+        plt.savefig(os.path.join(folder_path, f"loss_lineplots_{hash_array(np.array(plot_ids))}_{vocab_size}_{alpha}.png"))
     plt.show()
 
-
+# TODO: outdated!
 def get_loss_heatmap_data(task_name, measure, task_ids=None):
     measure_name = {"ood": "OODLoss", "id": "loss", "ih": "ih_score", "pth": "pth_score"}
     folder_path = os.path.join("results", task_name)
@@ -615,6 +740,8 @@ def get_loss_heatmap_data(task_name, measure, task_ids=None):
         heatmap[i, j] = loss
     return heatmap, sorted_steps, sorted_trans
 
+
+# TODO: outdated!
 def get_loss_heatmap(task_name, measure, task_ids=None, log_scale=False):
     measure_name = {"ood": "OODLoss", "id": "loss", "ih": "ih_score", "pth": "pth_score"}
     folder_path = os.path.join("results", task_name)
@@ -652,6 +779,7 @@ def get_loss_heatmap(task_name, measure, task_ids=None, log_scale=False):
     plt.show()
 
 
+# TODO: outdated!
 def get_loss_heatmap_dual(task_name, task_ids=None, log_scale=False):
     folder_path = os.path.join("results", task_name)
     heatmap_ood, sorted_steps, sorted_trans = get_loss_heatmap_data(task_name, "ood", task_ids=task_ids)
@@ -717,20 +845,15 @@ def get_loss_heatmap_dual(task_name, task_ids=None, log_scale=False):
 
 
 
-def get_attn_score_lineplot(task_name, vocab_size=20, task_ids=None):
+def get_attn_score_lineplot(task_name, vocab_size=20, task_ids=None,
+                            alpha=1.0, seq_len=512, hidden_dim=64, stationary=False):
     folder_path = os.path.join("results", task_name)
     folders = [name for name in os.listdir(folder_path) if os.path.isdir(os.path.join(folder_path, name))]
     # Create a 1x2 subplot layout
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5), sharey=True)  # adjust figsize as needed
 
-    # Define normalization and colormap
-    if task_ids is None:
-        norm = mcolors.Normalize(vmin=0, vmax=13)
-    else:
-        norm = mcolors.Normalize(vmin=min(task_ids), vmax=max(task_ids))
-    cmap = plt.get_cmap('plasma')
-    sm = cm.ScalarMappable(cmap=cmap, norm=norm)
-    sm.set_array([])
+    plot_ids = []
+    plot_paths = []
 
     for i in range(len(folders)):
         result_path = os.path.join(folder_path, folders[i])
@@ -739,17 +862,43 @@ def get_attn_score_lineplot(task_name, vocab_size=20, task_ids=None):
         log_data = load_log(log_path)
         config = load_config(config_path)
 
-        if (task_ids is not None) and (config.task.total_trans not in task_ids):
-            continue
+        if (task_ids is not None) and (config.task.total_trans not in task_ids): continue
 
-        if config.vocab_size != vocab_size:
+        if config.vocab_size != vocab_size: continue
+
+        if config.task.alpha != alpha: continue
+
+        if config.seq_len != seq_len: continue
+
+        if config.model.emb_dim != hidden_dim: continue
+
+        if "stationary" in config.task:
+            if config.task.stationary != stationary: continue
+        elif stationary:
             continue
+        
+        plot_ids.append(config.task.total_trans)
+        plot_paths.append(result_path)
+    
+    plot_ids = np.array(plot_ids)
+    if task_ids is None:
+        norm = mcolors.Normalize(vmin=np.log2(min(plot_ids)), vmax=np.log2(max(plot_ids)))
+    else:
+        norm = mcolors.Normalize(vmin=min(plot_ids), vmax=max(plot_ids))
+    cmap = plt.get_cmap('plasma')
+    sm = cm.ScalarMappable(cmap=cmap, norm=norm)
+    sm.set_array([])
+
+    for path in plot_paths:
+        log_path = os.path.join(path, "log.json")
+        config_path = os.path.join(path, "config.json")
+        log_data = load_log(log_path)
+        config = load_config(config_path)
 
         if task_ids is None:
             value = np.log2(config.task.total_trans)
         else:
             value = config.task.total_trans
-        
         color = cmap(norm(value))
         
         # Plot 1: IH Score
@@ -775,11 +924,16 @@ def get_attn_score_lineplot(task_name, vocab_size=20, task_ids=None):
     cbar.set_label("Total Transitions")
 
     if task_ids is None:
-        plt.savefig(os.path.join(folder_path, "attn_scores_lineplots.png"))
+        plt.savefig(os.path.join(folder_path, f"attn_scores_lineplots_{vocab_size}_{alpha}.png"))
     else:
-        plt.savefig(os.path.join(folder_path, f"attn_scores_lineplots_{hash_array(task_ids)}.png"))
+        plt.savefig(os.path.join(folder_path, f"attn_scores_lineplots_{hash_array(plot_ids)}_{vocab_size}_{alpha}.png"))
     plt.show()
 
+
+
+########################   
+# Loss along positions #
+########################
 
 def kl_plot(model, sampler, task=None, num_samples=100, pos=None):
     if task == None:
@@ -883,26 +1037,90 @@ def predictive_distribution_batched(x_seq_batch, transition_matrices):
     pred_probs = torch.exp(log_pred)  # (B, N)
     return pred_probs
 
+#TODO: build a hashmap for faster access
 
-def bayes_kl_plot(sampler, task=None, num_samples=2000, low=1, high=60):
+def bayes_emp_plot(vocab_size=10, total_trans=10, file_path=None, 
+                   alpha=0.5, seq_len=512, hidden_dim=64, stationary=False,
+                   task=None, num_samples=2000, low=1, high=200, 
+                   emp=True, bayes=True, unigram=True):
+    assert emp or bayes or unigram, "At least one of emp or bayes or unigram should be True"
+
+    if file_path is not None:
+        folder_name = file_path
+        _, sampler, _ = load_everything("latent", folder_name)
+    else:
+        folder_name = get_config(vocab_size=vocab_size, total_trans=total_trans, 
+                                alpha=alpha, seq_len=seq_len, hidden_dim=hidden_dim, stationary=stationary)
+
+        if len(folder_name) > 0:
+            _, sampler, _ = load_everything("latent", folder_name[0])
+        else:
+            print("The configuration does not exist.")
+            return
+
     if task is None:
         batch, _, latents = sampler.generate(mode="testing", num_samples=num_samples, task=task)
     else:
         batch, _ = sampler.generate(mode="testing", num_samples=num_samples, task=task)
         latents = task
+
+    batch_size, seq_len = batch.shape
+    trans_mat_est = torch.ones((batch_size, sampler.num_states, sampler.num_states), device=batch.device)
+    uni_trans_mat_est = torch.ones((batch_size, sampler.num_states), device=batch.device)
+    next_states = batch[:, 1:]  # (B, T-1)
+
+    values = torch.ones(batch_size, dtype=torch.float, device=batch.device)  # Same size as positions
+
+    emp_mean_losses = np.zeros(high-low)
+    emp_std_losses = np.zeros(high-low)
+    bayes_mean_losses = np.zeros(high-low)
+    bayes_std_losses = np.zeros(high-low)
+
+    if unigram:
+        unigram_mean_losses = np.zeros(high-low)
+        unigram_std_losses = np.zeros(high-low)
     
-    mean_losses = np.zeros(high-low)
-    std_losses = np.zeros(high-low)
-    
+    for t in range(low):
+        trans_mat_est.index_put_((torch.arange(batch_size), batch[:,t], next_states[:,t]), values, accumulate=True)
+        uni_trans_mat_est.index_put_((torch.arange(batch_size), batch[:,t]), values, accumulate=True)
+
     for pos in range(low, high):
+        pred_probs = trans_mat_est / trans_mat_est.sum(dim=-1, keepdim=True)
+        trans_mat_est.index_put_((torch.arange(batch_size), batch[:,pos], next_states[:,pos]), values, accumulate=True)
+        uni_trans_mat_est.index_put_((torch.arange(batch_size), batch[:,pos]), values, accumulate=True)
+
+        
+        kl_div = F.kl_div(pred_probs[torch.arange(batch_size),
+                                     batch[:,pos]].log(), sampler.trans_mat[latents, batch[:,pos]], reduction="none").sum(dim=-1)
+        emp_mean_losses[pos-low] = kl_div.mean().detach().cpu().numpy()
+        emp_std_losses[pos-low] = kl_div.std().detach().cpu().numpy()
+
+        if unigram:
+            pred_probs = uni_trans_mat_est / uni_trans_mat_est.sum(dim=-1, keepdim=True)
+
+            kl_div = F.kl_div(pred_probs[torch.arange(batch_size)].log(), 
+                            sampler.stationary[latents], reduction="none").sum(dim=-1)
+        
+            unigram_mean_losses[pos-low] = kl_div.mean().detach().cpu().numpy()
+            unigram_std_losses[pos-low] = kl_div.std().detach().cpu().numpy()
+
         pred_probs = predictive_distribution_batched(batch[:,:pos], sampler.trans_mat)
         kl_div = F.kl_div(pred_probs.log(), sampler.trans_mat[latents, batch[:,pos-1]], reduction="none").sum(dim=-1)
-        mean_losses[pos-low] = kl_div.mean().detach().cpu().numpy()
-        std_losses[pos-low] = kl_div.std().detach().cpu().numpy()
+        bayes_mean_losses[pos-low] = kl_div.mean().detach().cpu().numpy()
+        bayes_std_losses[pos-low] = kl_div.std().detach().cpu().numpy()
     
     arr = np.arange(low, high)
-    plt.plot(arr, mean_losses)
-    plt.fill_between(arr, np.maximum(mean_losses - 2*std_losses, 0), mean_losses + 2*std_losses, color='blue', alpha=0.3, label="Mean ± 2 std")
+    if emp:
+        plt.plot(arr, emp_mean_losses)
+        plt.fill_between(arr, np.maximum(emp_mean_losses - 2*emp_std_losses, 0), emp_mean_losses + 2*emp_std_losses, color='blue', alpha=0.3, label="Emp Mean ± 2 std")
+
+    if bayes:
+        plt.plot(arr, bayes_mean_losses)
+        plt.fill_between(arr, np.maximum(bayes_mean_losses - 2*bayes_std_losses, 0), bayes_mean_losses + 2*bayes_mean_losses, color='orange', alpha=0.3, label="Bayes Mean ± 2 std")
+    
+    if unigram:
+        plt.plot(arr, unigram_mean_losses)
+        plt.fill_between(arr, np.maximum(unigram_mean_losses - 2*unigram_std_losses, 0), unigram_mean_losses + 2*unigram_mean_losses, color='green', alpha=0.3, label="Unigram Mean ± 2 std")
     
     plt.grid()
     if task is not None:
@@ -917,12 +1135,22 @@ def bayes_kl_plot(sampler, task=None, num_samples=2000, low=1, high=60):
     plt.show()
 
 
-def emp_bigram_plot(sampler, task=None, num_samples=2000, low=1, high=200):
-    if task is None:
-        batch, _, latents = sampler.generate(mode="testing", num_samples=num_samples, task=task)
+def bayes_emp_ood_plot(
+        vocab_size, total_trans, 
+        alpha=0.5, seq_len=512, hidden_dim=64, num_samples=2000, low=1, high=200, 
+        emp=True, bayes=True):
+    assert emp or bayes, "At least one of emp or bayes should be True"
+
+    folder_name = get_config(vocab_size=vocab_size, total_trans=total_trans, 
+                             alpha=alpha, seq_len=seq_len, hidden_dim=hidden_dim)
+
+    if len(folder_name) > 0:
+        _, sampler, _ = load_everything("latent", folder_name[0])
     else:
-        batch, _ = sampler.generate(mode="testing", num_samples=num_samples, task=task)
-        latents = task
+        print("The configuration does not exist.")
+        return
+
+    batch, _, trans_mat = sampler.generate(mode="ood", num_samples=num_samples, return_trans_mat=True)
 
     batch_size, seq_len = batch.shape
     trans_mat_est = torch.ones((batch_size, sampler.num_states, sampler.num_states), device=batch.device)
@@ -930,8 +1158,10 @@ def emp_bigram_plot(sampler, task=None, num_samples=2000, low=1, high=200):
 
     values = torch.ones(batch_size, dtype=torch.float, device=batch.device)  # Same size as positions
 
-    mean_losses = np.zeros(high-low)
-    std_losses = np.zeros(high-low)
+    emp_mean_losses = np.zeros(high-low)
+    emp_std_losses = np.zeros(high-low)
+    bayes_mean_losses = np.zeros(high-low)
+    bayes_std_losses = np.zeros(high-low)
     
     for t in range(low):
         trans_mat_est.index_put_((torch.arange(batch_size), batch[:,t], next_states[:,t]), values, accumulate=True)
@@ -941,19 +1171,27 @@ def emp_bigram_plot(sampler, task=None, num_samples=2000, low=1, high=200):
         trans_mat_est.index_put_((torch.arange(batch_size), batch[:,pos], next_states[:,pos]), values, accumulate=True)
         
         kl_div = F.kl_div(pred_probs[torch.arange(batch_size),
-                                     batch[:,pos]].log(), sampler.trans_mat[latents, batch[:,pos]], reduction="none").sum(dim=-1)
-        mean_losses[pos-low] = kl_div.mean().detach().cpu().numpy()
-        std_losses[pos-low] = kl_div.std().detach().cpu().numpy()
+                                     batch[:,pos]].log(), 
+                                     trans_mat[torch.arange(batch_size), batch[:,pos]], reduction="none").sum(dim=-1)
+        emp_mean_losses[pos-low] = kl_div.mean().detach().cpu().numpy()
+        emp_std_losses[pos-low] = kl_div.std().detach().cpu().numpy()
+
+        pred_probs = predictive_distribution_batched(batch[:,:pos], sampler.trans_mat)
+        kl_div = F.kl_div(pred_probs.log(), trans_mat[torch.arange(batch_size), batch[:,pos-1]], reduction="none").sum(dim=-1)
+        bayes_mean_losses[pos-low] = kl_div.mean().detach().cpu().numpy()
+        bayes_std_losses[pos-low] = kl_div.std().detach().cpu().numpy()
     
     arr = np.arange(low, high)
-    plt.plot(arr, mean_losses)
-    plt.fill_between(arr, np.maximum(mean_losses - 2*std_losses, 0), mean_losses + 2*std_losses, color='blue', alpha=0.3, label="Mean ± 2 std")
+    if emp:
+        plt.plot(arr, emp_mean_losses)
+        plt.fill_between(arr, np.maximum(emp_mean_losses - 2*emp_std_losses, 0), emp_mean_losses + 2*emp_std_losses, color='blue', alpha=0.3, label="Emp Mean ± 2 std")
+
+    if bayes:
+        plt.plot(arr, bayes_mean_losses)
+        plt.fill_between(arr, np.maximum(bayes_mean_losses - 2*bayes_std_losses, 0), bayes_mean_losses + 2*bayes_mean_losses, color='orange', alpha=0.3, label="Bayes Mean ± 2 std")
     
     plt.grid()
-    if task is not None:
-        plt.title(f"Average KL-divergence for task {task}")
-    else:
-        plt.title("Average KL-divergence over all tasks")
+    plt.title("Average KL-divergence over all tasks (OOD)")
     plt.xlabel("Positions")
     plt.ylabel("KL-divergence")
     plt.legend()
@@ -962,15 +1200,21 @@ def emp_bigram_plot(sampler, task=None, num_samples=2000, low=1, high=200):
     plt.show()
 
 
-
-
-
-def all_kl_plot(vocab_size, total_trans, task=None, num_samples=2000, low=1, high=200, truth=True):
-    folder_name = get_config(vocab_size=vocab_size, total_trans=total_trans)
-    if len(folder_name) > 0:
-        model, sampler, _ = load_everything("latent", folder_name[0])
+def all_kl_plot(vocab_size=10, total_trans=10, file_path=None, task=None, 
+                seq_len=512, alpha=0.5, hidden_dim=64, stationary=False,
+                num_samples=2000, low=1, high=200, 
+                unigram=True,
+                truth=True, unif=True):
+    if file_path is not None:
+        model, sampler, _ = load_everything("latent", file_path)
     else:
-        return
+        folder_name = get_config(vocab_size=vocab_size, total_trans=total_trans, 
+                                alpha=alpha, seq_len=seq_len, hidden_dim=hidden_dim, stationary=stationary)
+        if len(folder_name) > 0:
+            model, sampler, _ = load_everything("latent", folder_name[0])
+        else:
+            print("The configuration does not exist.")
+            return
     if task is None:
         batch, _, tasks = sampler.generate(mode="testing", task=task, num_samples=num_samples)
         B,T = batch.shape
@@ -1012,6 +1256,7 @@ def all_kl_plot(vocab_size, total_trans, task=None, num_samples=2000, low=1, hig
 
     batch_size, seq_len = batch.shape
     emp_trans_mat_est = torch.ones((batch_size, sampler.num_states, sampler.num_states), device=batch.device)
+    uni_trans_mat_est = torch.ones((batch_size, sampler.num_states), device=batch.device)
     next_states = batch[:, 1:]  # (B, T-1)
 
     values = torch.ones(batch_size, dtype=torch.float, device=batch.device)  # Same size as positions
@@ -1019,15 +1264,22 @@ def all_kl_plot(vocab_size, total_trans, task=None, num_samples=2000, low=1, hig
     emp_mean_losses = np.zeros(high-low)
     emp_std_losses = np.zeros(high-low)
 
+    unigram_mean_losses = np.zeros(high-low)
+    unigram_std_losses = np.zeros(high-low)
+
     bayes_mean_losses = np.zeros(high-low)
     bayes_std_losses = np.zeros(high-low)
     
     for t in range(low):
         emp_trans_mat_est.index_put_((torch.arange(batch_size), batch[:,t], next_states[:,t]), values, accumulate=True)
+        uni_trans_mat_est.index_put_((torch.arange(batch_size), batch[:,t]), values, accumulate=True)
+
 
     for pos in range(low, high):
-        emp_probs = emp_trans_mat_est / emp_trans_mat_est.sum(dim=-1, keepdim=True) # 
+        emp_probs = emp_trans_mat_est / emp_trans_mat_est.sum(dim=-1, keepdim=True) 
+        unigram_probs = uni_trans_mat_est / uni_trans_mat_est.sum(dim=-1, keepdim=True) 
         emp_trans_mat_est.index_put_((torch.arange(batch_size), batch[:,pos], next_states[:,pos]), values, accumulate=True)
+        uni_trans_mat_est.index_put_((torch.arange(batch_size), batch[:,pos]), values, accumulate=True)
 
         kl_div = F.kl_div(model_pred_probs[:, pos].log(), 
                           emp_probs[torch.arange(batch_size), batch[:,pos]],
@@ -1035,6 +1287,13 @@ def all_kl_plot(vocab_size, total_trans, task=None, num_samples=2000, low=1, hig
         
         emp_mean_losses[pos-low] = kl_div.mean()
         emp_std_losses[pos-low] = kl_div.std()
+
+
+        kl_div = F.kl_div(model_pred_probs[:, pos].log(),
+                          unigram_probs[torch.arange(batch_size)],
+                          reduction="none").sum(dim=-1).detach().cpu().numpy()
+        unigram_mean_losses[pos-low] = kl_div.mean()
+        unigram_std_losses[pos-low] = kl_div.std()
 
         if (total_trans < 300) and truth:
 
@@ -1062,11 +1321,17 @@ def all_kl_plot(vocab_size, total_trans, task=None, num_samples=2000, low=1, hig
         plt.fill_between(arr, np.maximum(bayes_mean_losses - bayes_std_losses, 0), 
                         bayes_mean_losses + bayes_std_losses, color=cmap(2), 
                         alpha=0.3, label="Bayes Mean ± std")
+    if unif:
+        plt.plot(arr, unif_mean_losses, color=cmap(3))
+        plt.fill_between(arr, np.maximum(unif_mean_losses - unif_std_losses, 0),
+                        unif_mean_losses + unif_std_losses, color=cmap(3),
+                        alpha=0.3, label="Uniform Mean ± std")
     
-    plt.plot(arr, unif_mean_losses, color=cmap(3))
-    plt.fill_between(arr, np.maximum(unif_mean_losses - unif_std_losses, 0),
-                     unif_mean_losses + unif_std_losses, color=cmap(3),
-                     alpha=0.3, label="Uniform Mean ± std")
+    if unigram:
+        plt.plot(arr, unigram_mean_losses, color=cmap(4))
+        plt.fill_between(arr, np.maximum(unigram_mean_losses - unigram_std_losses, 0),
+                        unigram_mean_losses + unigram_std_losses, color=cmap(4),
+                        alpha=0.3, label="Unigram Mean ± std")
     
     plt.grid()
     if task is not None:
