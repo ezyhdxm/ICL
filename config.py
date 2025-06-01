@@ -8,13 +8,13 @@ import os
 def get_config() -> ConfigDict:
     config = ConfigDict()
     config.seq_len = 512
-    config.vocab_size = 6
+    config.vocab_size = 10
     config.seed = None
     config.batch_size = 64
     config.eval_size = 512
     config.test_size = 4096
     config.device = "cuda" if torch.cuda.is_available() else "cpu"
-    config.work_dir = os.path.join("results", "latent")  # Specify working directory
+    config.work_dir = os.path.join("results", "fuzzy")  # Specify working directory
     config.ngram = 3  # N-gram order for the n-gram learner
     config.wandb = ConfigDict()
     config.wandb.project = "ICL"  # Specify wandb project
@@ -24,21 +24,29 @@ def get_config() -> ConfigDict:
     #####################
     
     config.task = ConfigDict()
-    config.task.name = "latent"
+    config.task.name = "fuzzy"
     config.task.order = 1  # Order of the Markov chain
-    config.task.alpha = 0.5  # Dirichlet prior for the transition matrix
+    config.task.alpha = 1  # Dirichlet prior for the transition matrix
     config.task.ood = True  # Out-of-distribution flag
-    config.task.total_trans = 45  # Total number of transitions to sample
-    config.task.stationary = True # Whether to use sampled stationary distribution
+    config.task.total_trans = 2000  # Total number of transitions to sample
+    if config.task.name == "latent":
+        config.task.stationary = True # Whether to use sampled stationary distribution
 
     # configurations for random triggers
-    config.task.cardinality = 1  # Number of random distributions, this is for the frm task
-    config.task.random_alpha = 1  # Dirichlet prior for random transition
-    config.task.dist_name = "finite_dirichlet"  # Distribution for the transition matrix
-    config.task.random_order = 1  # Random order for the Markov chain
-    config.task.rho = 0.2  
-    config.task.fixed = False  # Whether to fix the triggers
+    elif config.task.name == "frm":
+        config.task.cardinality = 1  # Number of random distributions, this is for the frm task
+        config.task.random_alpha = 1  # Dirichlet prior for random transition
+        config.task.dist_name = "finite_dirichlet"  # Distribution for the transition matrix
+        config.task.random_order = 1  # Random order for the Markov chain
+        config.task.rho = 0.2  
+        config.task.fixed = False  # Whether to fix the triggers
     
+    elif config.task.name in ["repetition", "reversion", "fuzzy"]:
+        config.task.repeat_length = 8
+        config.task.repeat_prob = 6/config.seq_len  # Probability of repeating the sequence
+    
+    elif config.task.name == "dyck":
+        config.task.dyck_length = 8
     
 
     ######################
@@ -67,7 +75,7 @@ def get_config() -> ConfigDict:
     #######################
     
     config.training = ConfigDict()
-    config.training.num_epochs = 10000
+    config.training.num_epochs = 20000
     config.training.learning_rate = 6e-4
     config.training.eval_iter = 100
     config.training.get_attn = 1000

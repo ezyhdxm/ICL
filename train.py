@@ -7,6 +7,9 @@ from models.ngram_trigger import *
 from collections import defaultdict
 # from tasks.causal_graph import *
 from torch.optim.lr_scheduler import CosineAnnealingLR
+from tasks.repetition import RepetitionTask
+from tasks.fuzzy_copy import FuzzyCopyTask
+from tasks.reversion import ReversedTask
 from probe_util import *
 from absl import logging
 
@@ -38,6 +41,8 @@ def train_model(model, config):
         return train_trigger(model, config)
     elif config.task.name in ["icl-mc", "latent"]:
         return train_latent(model, config)
+    elif config.task.name in ["repetition", "reversion", "fuzzy"]:
+        return train_markov(model, config)
     
     raise NotImplementedError(f"Task '{config.task.name}' not implemented yet or is a legacy task. Please choose 'frm', 'bietti', 'icl-mc', or 'latent' for training.")
 
@@ -47,6 +52,9 @@ def get_sampler(config):
         "icl-mc": ICLMarkovSampler,
         "frm": FRMarkovSampler,
         "latent": LatentMarkov,
+        "repetition": RepetitionTask,
+        "reversion": ReversedTask,
+        "fuzzy": FuzzyCopyTask,
     }
     if config.task.name in task_samplers:
         return task_samplers[config.task.name](config)
@@ -60,7 +68,7 @@ def _init_log() -> dict:
            "baseline": {},
            "eval/loss": [], "eval/step": [], 
            "eval/IDLoss": [], "eval/ICLLoss": [], "eval/OODLoss": [], "eval/CopyError": [],
-           "eval/pth_score": [], "eval/ih_score": [],
+           "eval/pth_score": [], "eval/ih_score": [], "train/task_loss": []
            }
     return log
 
@@ -298,6 +306,7 @@ def train_latent(model, config, verbose=False):
     test_data, test_info = sampler.generate(mode="test")
     test_target = test_data[:, 1:].reshape(-1)
     
+    
     if config.task.ood:
         ood_batch, _ = sampler.generate(mode="ood")
         ood_target = ood_batch[:, 1:].reshape(-1)
@@ -400,12 +409,191 @@ def train_latent(model, config, verbose=False):
                     outputs = outputs[:, :-1, :].reshape(-1, config.vocab_size)
                     eval_loss = criterion(outputs, test_target)
                     log["eval/loss"].append(eval_loss.item())
-                    wandb.log({"eval/IDloss": eval_loss.item()}, step=step)
+                    wandb.log({"eval/IDLoss": eval_loss.item()}, step=step)
                     log["eval/step"].append(step)
                     if config.task.ood:
                         ood_outputs, _ = model(ood_batch)
                         ood_outputs = ood_outputs[:, :-1, :].reshape(-1, config.vocab_size)
                         ood_loss = criterion(ood_outputs, ood_target)
+                        log["eval/OODLoss"].append(ood_loss.item())
+                        wandb.log({"eval/OODLoss": ood_loss.item()}, step=step)
+                    
+                    pth = pth_score(model, eval_batch)
+                    log["eval/pth_score"].append(pth)
+                    wandb.log({"eval/pth_score": pth}, step=step)
+                    ih = ih_score(model, eval_batch, config.device)
+                    log["eval/ih_score"].append(ih)
+                    wandb.log({"eval/ih_score": ih}, step=step)
+                    
+    
+    os.makedirs(checkpoint_path, exist_ok=True)
+    torch.save({
+        "model": model.state_dict(), 
+        "optimizer": optimizer.state_dict(),
+        "step": step,
+        }, os.path.join(checkpoint_path, f"model_final_{step}.pt"))
+    with open(log_path, "w") as f:
+        json.dump(log, f, indent=2)
+
+    print("Training complete.")
+            
+
+    return get_train_result(log=log, config=config, sampler=sampler, attn_maps=attn_maps, probes=probes)
+
+
+
+
+
+
+
+def train_markov(model, config, verbose=False):
+
+    exp_name = f"train_{get_hash(config)}"
+    exp_dir = os.path.join(config.work_dir, exp_name)  
+    logging.info(f"Train Experiment\nNAME: {exp_name}\nCONFIG:\n{config}")
+    
+    # Specify the maximum number of epochs to generate in one pass to speedup data generation
+    if config.device == "cpu":
+        MAX_SIZE = 500 * (32 * 1024 * 1024 // (config.batch_size * config.seq_len) // 500)
+    else:
+        MAX_SIZE = 500 * (64 * 1024 * 1024 // (config.batch_size * config.seq_len) // 500)
+
+    # Skip if already completed
+    log_path = os.path.join(exp_dir, "log.json")
+    if os.path.exists(log_path):
+        print(f"{exp_name} already completed")
+        return
+    
+    # Save config
+    os.makedirs(exp_dir, exist_ok=True)
+    with open(os.path.join(exp_dir, "config.json"), "w") as f:
+        f.write(config.to_json())
+    
+    log = _init_log()
+    
+    checkpoint_path = os.path.join(exp_dir, f"checkpoints")
+
+    print(tabulate_model(model, 
+                         config.seq_len, config.batch_size, config.device)) 
+    
+    sampler = get_sampler(config)
+
+
+    # last_token_losses = []
+    attn_maps, probes = {}, defaultdict(list)
+    # many_ngram_losses = {}
+    # bayes_losses = []
+    criterion = nn.CrossEntropyLoss() 
+    optimizer = torch.optim.AdamW(model.parameters(), 
+                                  lr=config.training.learning_rate, 
+                                  weight_decay=config.training.weight_decay) #torch.optim.Adam(model.parameters(), lr=config.learning_rate)
+    scheduler = CosineAnnealingLR(optimizer, 
+                                  T_max=config.training.T_max) if config.training.scheduler is True else None
+    
+    
+    test_data, test_info = sampler.generate(mode="test")
+    test_info = test_info[:, 1:].reshape(-1)
+    test_target = test_data[:, 1:].reshape(-1)
+    
+    if config.task.ood:
+        ood_batch, ood_mask = sampler.generate(mode="ood")
+        ood_mask = ood_mask[:, :-1].reshape(-1)
+        ood_target = ood_batch[:, 1:].reshape(-1)
+    
+    eval_batch, eval_mask = sampler.generate(mode="eval")
+    eval_mask = eval_mask[:, :-1].reshape(-1)
+    
+    step = 0
+    epochs = min(config.training.num_epochs, MAX_SIZE)
+    while config.training.num_epochs % epochs != 0:
+        epochs -= 1
+
+    tot_iters = config.training.num_epochs // epochs
+
+    wandb.init(config=config, name=exp_name, **config["wandb"])
+
+    
+    ##################
+    # Start training #
+    ##################
+
+    print("Starting training...")
+    for iters in range(tot_iters): #trange(tot_iters, leave=False):
+        data = sampler.generate(epochs=epochs)
+        sample, sample_info = data
+        # miniters = epochs // 50
+        for i in range(epochs): # trange(epochs, leave=False, miniters=miniters):
+            step += 1
+            model.train()
+            batch = sample[i]
+            batch_info = sample_info[i]
+            
+            optimizer.zero_grad()
+            targets = batch[:, 1:].reshape(-1)
+
+            # get_attn_flag = (step < early_steps) or (step % early_steps == 0)
+
+            if (config.training.get_attn) > 0 and (step % config.training.get_attn == 0): # and get_attn_flag:
+                outputs, attn = model(batch, get_attn=True)
+                attn_maps[step] = {l: v.clone() for l, v in attn.items()}
+            else:
+                outputs, _ = model(batch)
+            
+            # last_token = outputs[:, -2, :].reshape(-1, config.vocab_size) # (B, V)
+            outputs = outputs[:, :-1, :].reshape(-1, config.vocab_size)
+            batch_info = batch_info[:, :-1].reshape(-1)
+            loss = criterion(outputs, targets)
+            task_loss = criterion(outputs[batch_info > 0], targets[batch_info > 0])
+            # if is_icl:
+            #    last_token_losses.append(last_token_loss(last_token, batch_info).item())
+            
+            # with torch.no_grad():
+            #    if task_handler:
+            #        # collect probes etc.
+            #        task_handler(model, batch, outputs, batch_info, criterion, bigram_losses, icl_losses, probes, config, sampler, random_tokens, layer)
+            
+            log["train/loss"].append(loss.item())
+            wandb.log({"train/loss": loss.item()}, step=step)
+            log["train/task_loss"].append(task_loss.item())
+            wandb.log({"train/task_loss": task_loss.item()}, step=step)
+            loss.backward()
+            optimizer.step()
+            if scheduler: scheduler.step()
+            
+            if config.training.get_checkpoints > 0 and ((step % config.training.get_checkpoints == 0) 
+                                                        or (step < min(config.training.get_checkpoints, 200) and step % 5 == 0)):
+                
+                os.makedirs(checkpoint_path, exist_ok=True)
+                torch.save({
+                    "model": model.state_dict(), 
+                    "optimizer": optimizer.state_dict(),
+                    "step": step,
+                    }, os.path.join(checkpoint_path, f"model_{step}.pt"))
+
+
+            if (step % config.training.eval_iter == 0) or (step < min(config.training.eval_iter, 100) and step % 5 == 0):
+                if verbose:
+                    print(f"Step: {step}")
+                log["train/step"].append(step)
+                lr_val = scheduler.get_last_lr()[0] if scheduler else config.training.learning_rate
+                log["train/lr"].append(lr_val)
+                wandb.log({"train/lr": lr_val}, step=step)
+                with torch.no_grad():
+                    model.eval()
+                    outputs, _ = model(test_data)
+                    outputs = outputs[:, :-1, :].reshape(-1, config.vocab_size)
+                    
+                    eval_loss = criterion(outputs, test_target)
+                    log["eval/loss"].append(eval_loss.item())
+                    wandb.log({"eval/loss": eval_loss.item()}, step=step)
+                    eval_task_loss = criterion(outputs[test_info > 0], test_target[test_info > 0])
+                    log["eval/IDLoss"].append(eval_task_loss.item())
+                    wandb.log({"eval/IDLoss": eval_task_loss.item()}, step=step)
+                    log["eval/step"].append(step)
+                    if config.task.ood:
+                        ood_outputs, _ = model(ood_batch)
+                        ood_outputs = ood_outputs[:, :-1, :].reshape(-1, config.vocab_size)
+                        ood_loss = criterion(ood_outputs[ood_mask > 0], ood_target[ood_mask > 0])
                         log["eval/OODLoss"].append(ood_loss.item())
                         wandb.log({"eval/OODLoss": ood_loss.item()}, step=step)
                     
@@ -459,7 +647,8 @@ def train_model_with_plot(model, config, show=False):
     plot_probes(train_results, config, folder=plot_path, show=True, log=True)
     plot_attn_scores(train_results, config, folder=plot_path, show=True, log=False)
     plot_attn_scores(train_results, config, folder=plot_path, show=True, log=True)
-    plot_bigram_icl_risk(config, train_results, folder=plot_path, show=True)
+    if config.task.name not in ["repetition", "reversion", "fuzzy"]:
+        plot_bigram_icl_risk(config, train_results, folder=plot_path, show=True)
 
     gif_paths = defaultdict(list)
     counts = 0

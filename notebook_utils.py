@@ -12,7 +12,7 @@ from matplotlib.colors import LogNorm
 from pprint import pprint
 
 from itertools import product
-from IPython.display import display
+from IPython.display import display, HTML
 import os
 import glob
 import re
@@ -30,6 +30,51 @@ import hashlib
 
 def hash_array(arr):
     return hashlib.sha256(arr.tobytes()).hexdigest()
+
+
+
+import pandas as pd
+
+def extract_experiment_metadata(root_dir=os.path.join("results", "latent")):
+    """
+    Extracts experiment metadata from a list of filenames.
+    
+    Each filename is expected to encode the following parameters:
+    - vocab_size: int
+    - alpha: float
+    - seq_len: int
+    - hidden_dim: int
+    - stationary: bool (represented as 'stationary' or 'nonstationary' in the filename)
+
+    Returns:
+        pd.DataFrame with columns:
+        ['vocab_size', 'alpha', 'seq_len', 'hidden_dim', 'stationary', 'filename']
+    """
+    records = []
+
+    for subdir in os.listdir(root_dir):
+        path = os.path.join(root_dir, subdir)
+        config_path = os.path.join(path, "config.json")
+
+        if os.path.isdir(path) and os.path.isfile(config_path):
+            try:
+                with open(config_path, "r") as f:
+                    config = ConfigDict(json.load(f))
+                record = {
+                    "vocab_size": config.vocab_size,
+                    "alpha": config.task.alpha,
+                    "total_transitions": config.task.total_trans,
+                    "seq_len": config.seq_len,
+                    "hidden_dim": config.model.emb_dim,
+                    "stationary": config.task.get("stationary"),
+                    "filename": subdir
+                }
+                records.append(record)
+            except Exception as e:
+                print(f"Failed to read {config_path}: {e}")
+    
+    return pd.DataFrame(records)
+
 
 ###############################
 # Memory Probes
@@ -284,6 +329,8 @@ def get_config(total_trans=None, vocab_size=10, path=None,
 ####################
 
 def load_log(log_path):
+    if not os.path.exists(log_path):
+        return None
     with open(log_path, "r") as f:
         log_data = json.load(f)
     return log_data
@@ -616,6 +663,7 @@ def get_loss_lineplot(task_name, vocab_size=20, task_ids=None,
         log_path = os.path.join(result_path, "log.json")
         config_path = os.path.join(result_path, "config.json")
         log_data = load_log(log_path)
+        if log_data is None: continue
         config = load_config(config_path)
 
         if (task_ids is not None) and (config.task.total_trans not in task_ids): continue
@@ -1344,3 +1392,34 @@ def all_kl_plot(vocab_size=10, total_trans=10, file_path=None, task=None,
     plt.tight_layout()
     
     plt.show()
+
+
+
+def view_mask(batch, info):
+    # Example 2D tensors
+    if batch.dim() == 3:
+        a = batch.squeeze(0)
+    else:
+        a = batch
+    if info.dim() == 3:
+        b = info.squeeze(0)
+    else:
+        b = info
+    
+    assert a.shape == b.shape and a.dim() == 2
+    
+    html = "<pre style='font-family: monospace; font-size: 12px; line-height: 1.2;'>"
+    
+    for i in range(a.shape[0]):
+        html += f"Seq {i:>2}:\n"
+        row_str = ""
+        for j in range(a.shape[1]):
+            val = a[i, j].item()
+            if b[i, j].item() != 0:
+                row_str += f"<span style='color:red; font-weight:bold;'>{val:>2}</span>"
+            else:
+                row_str += f"{val:>2}"
+        html += row_str + "<br>"
+    
+    html += "</pre>"
+    display(HTML(html))

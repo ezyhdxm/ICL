@@ -23,7 +23,15 @@ def get_loss_plots(config, train_results, folder="loss_plots", show=False, verbo
     print("Loss plots saved at ", folder)
     task_name = config.task.name
     log = train_results["log"]
-    train_losses, eval_losses, eval_steps = log["train/loss"], log["eval/loss"], log["eval/step"]
+    if len(log["train/task_loss"]) > 0:
+        train_losses = log["train/task_loss"]
+    else:
+        train_losses = log["train/loss"]
+    if len(log["eval/IDLoss"]) == 0:
+        eval_losses = log["eval/loss"]
+    else:
+        eval_losses = log["eval/IDLoss"]
+    eval_steps = log["eval/step"]
     baseline = log["baseline"] if "baseline" in log else []
     ood_losses = log["eval/OODLoss"] if "eval/OODLoss" in log else []
     # many_ngram_losses = train_results["many_ngram_losses"] if "many_ngram_losses" in train_results else []
