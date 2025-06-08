@@ -7,14 +7,15 @@ import os
 
 def get_config() -> ConfigDict:
     config = ConfigDict()
-    config.seq_len = 512
+    config.seq_len = 1024
     config.vocab_size = 10
     config.seed = None
     config.batch_size = 64
     config.eval_size = 512
     config.test_size = 4096
     config.device = "cuda" if torch.cuda.is_available() else "cpu"
-    config.work_dir = os.path.join("results", "fuzzy")  # Specify working directory
+    TASKNAME = "reversion"  # Default task name, can be overridden in config
+    config.work_dir = os.path.join("results", TASKNAME)  # Specify working directory
     config.ngram = 3  # N-gram order for the n-gram learner
     config.wandb = ConfigDict()
     config.wandb.project = "ICL"  # Specify wandb project
@@ -24,7 +25,7 @@ def get_config() -> ConfigDict:
     #####################
     
     config.task = ConfigDict()
-    config.task.name = "fuzzy"
+    config.task.name = TASKNAME  # Name of the task, can be "latent", "frm", "repetition", "reversion", "fuzzy", or "dyck"
     config.task.order = 1  # Order of the Markov chain
     config.task.alpha = 1  # Dirichlet prior for the transition matrix
     config.task.ood = True  # Out-of-distribution flag
@@ -42,8 +43,8 @@ def get_config() -> ConfigDict:
         config.task.fixed = False  # Whether to fix the triggers
     
     elif config.task.name in ["repetition", "reversion", "fuzzy"]:
-        config.task.repeat_length = 8
-        config.task.repeat_prob = 6/config.seq_len  # Probability of repeating the sequence
+        config.task.repeat_length = 16
+        config.task.repeat_prob = 16/config.seq_len  # Probability of repeating the sequence
     
     elif config.task.name == "dyck":
         config.task.dyck_length = 8
@@ -62,11 +63,11 @@ def get_config() -> ConfigDict:
     config.model.num_heads = (1, 1)  # Tuple of number of heads for each layer
     config.model.dropout = None  # Dropout rate, None means no dropout
     config.model.mask = True  # Whether to use masking in attention
-    config.model.mlp = (False, True)  # Tuple indicating whether to use MLP in each layer
+    config.model.mlp = (True, True)  # Tuple indicating whether to use MLP in each layer
     config.model.layer_norm = False  # Whether to use layer normalization
-    config.model.activation = (False, True)  # Tuple indicating whether to use activation in each layer
+    config.model.activation = (True, True)  # Tuple indicating whether to use activation in each layer
     config.model.pos_enc = "rotary"  # Type of positional encoding
-    config.model.pos_max_len = 256  # Maximum length for positional encoding
+    config.model.pos_max_len = config.seq_len  # Maximum length for positional encoding
     config.model.flash = True  # Whether to use flash attention for faster computation
     
 
@@ -75,7 +76,7 @@ def get_config() -> ConfigDict:
     #######################
     
     config.training = ConfigDict()
-    config.training.num_epochs = 20000
+    config.training.num_epochs = 24000
     config.training.learning_rate = 6e-4
     config.training.eval_iter = 100
     config.training.get_attn = 1000

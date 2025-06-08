@@ -68,7 +68,7 @@ def _init_log() -> dict:
            "baseline": {},
            "eval/loss": [], "eval/step": [], 
            "eval/IDLoss": [], "eval/ICLLoss": [], "eval/OODLoss": [], "eval/CopyError": [],
-           "eval/pth_score": [], "eval/ih_score": [], "train/task_loss": []
+           "eval/pth_score": [], "eval/ih_score": [], "train/task_loss": [], "eval/IDAcc": [], "eval/OODAcc": []
            }
     return log
 
@@ -587,15 +587,21 @@ def train_markov(model, config, verbose=False):
                     log["eval/loss"].append(eval_loss.item())
                     wandb.log({"eval/loss": eval_loss.item()}, step=step)
                     eval_task_loss = criterion(outputs[test_info > 0], test_target[test_info > 0])
+                    eval_task_acc = (outputs[test_info > 0].argmax(dim=-1) == test_target[test_info > 0]).float().mean().item()
                     log["eval/IDLoss"].append(eval_task_loss.item())
+                    log["eval/IDAcc"].append(eval_task_acc)
                     wandb.log({"eval/IDLoss": eval_task_loss.item()}, step=step)
+                    wandb.log({"eval/IDAcc": eval_task_acc}, step=step)
                     log["eval/step"].append(step)
                     if config.task.ood:
                         ood_outputs, _ = model(ood_batch)
                         ood_outputs = ood_outputs[:, :-1, :].reshape(-1, config.vocab_size)
                         ood_loss = criterion(ood_outputs[ood_mask > 0], ood_target[ood_mask > 0])
+                        ood_acc = (ood_outputs[ood_mask > 0].argmax(dim=-1) == ood_target[ood_mask > 0]).float().mean().item()
                         log["eval/OODLoss"].append(ood_loss.item())
+                        log["eval/OODAcc"].append(ood_acc)
                         wandb.log({"eval/OODLoss": ood_loss.item()}, step=step)
+                        wandb.log({"eval/OODAcc": ood_acc}, step=step)
                     
                     pth = pth_score(model, eval_batch)
                     log["eval/pth_score"].append(pth)
