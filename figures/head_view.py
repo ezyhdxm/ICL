@@ -5,20 +5,25 @@ from IPython.core.display import display, HTML, Javascript
 from figures.view_util import *
 
 # Adapted from https://github.com/jessevig/bertviz/tree/master
-def head_view(attention, tokens=None, layer=None, heads=None, include_layers=None, html_action='view'):
+def head_view(attention, mask=None, tokens=None, layer=None, heads=None, include_layers=None, html_action='view'):
 
     attn_data = []
     if tokens is None: raise ValueError("'tokens' is required")
     if include_layers is None: include_layers = list(range(len(attention))) # include all layers
     attention = format_attention(attention, include_layers)
+    if mask is None:
+        mask = [[0] * len(tokens)]
+    
     attn_data.append(
         {
             'name': None,
             'attn': attention.tolist(),
             'left_text': tokens,
-            'right_text': tokens
+            'right_text': tokens,
+            'mask': mask
         }
     )
+
 
     if layer is not None and layer not in include_layers:
         raise ValueError(f"Layer {layer} is not in include_layers: {include_layers}")
@@ -54,6 +59,8 @@ def head_view(attention, tokens=None, layer=None, heads=None, include_layers=Non
                 f"for tokens: {' '.join(d['left_text'])}"
             )
 
+
+
     params = {
         'attention': attn_data,
         'default_filter': "0",
@@ -67,9 +74,9 @@ def head_view(attention, tokens=None, layer=None, heads=None, include_layers=Non
     if html_action == 'view':
         display(HTML('<script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js"></script>'))
         display(HTML(vis_html))
-        __location__ = os.path.realpath(
-            os.path.join(os.getcwd(), os.path.dirname(__file__)))
-        vis_js = open(os.path.join(__location__, 'head_view.js')).read().replace("PYTHON_PARAMS", json.dumps(params))
+        __location__ = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
+        with open(os.path.join(__location__, 'head_view.js'), encoding='utf-8') as f:
+            vis_js = f.read().replace("PYTHON_PARAMS", json.dumps(params))  
         display(Javascript(vis_js))
 
     elif html_action == 'return':
@@ -77,9 +84,9 @@ def head_view(attention, tokens=None, layer=None, heads=None, include_layers=Non
 
         html2 = HTML(vis_html)
 
-        __location__ = os.path.realpath(
-            os.path.join(os.getcwd(), os.path.dirname(__file__)))
-        vis_js = open(os.path.join(__location__, 'head_view.js')).read().replace("PYTHON_PARAMS", json.dumps(params))
+        __location__ = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
+        with open(os.path.join(__location__, 'head_view.js'), encoding='utf-8') as f:
+            vis_js = f.read().replace("PYTHON_PARAMS", json.dumps(params))
         html3 = Javascript(vis_js)
         script = '\n<script type="text/javascript">\n' + html3.data + '\n</script>\n'
 
@@ -90,7 +97,7 @@ def head_view(attention, tokens=None, layer=None, heads=None, include_layers=Non
         raise ValueError("'html_action' parameter must be 'view' or 'return")
 
 
-def get_head_view(model, config, train_results=None, sampler=None, trunc=30, action='view', batch=None):
+def get_head_view(model, config, mask=None, train_results=None, sampler=None, trunc=30, action='view', batch=None):
     if train_results is None:
         if sampler is None:
             raise ValueError("Either 'train_results' or 'sampler' must be provided.")
@@ -109,7 +116,15 @@ def get_head_view(model, config, train_results=None, sampler=None, trunc=30, act
 
     trunc_attn = [attn_tensors[l][:1, :config.model.num_heads[l], trunc:, trunc:] for l in range(config.model.num_layers)]
     trunc_attn = [trunc_attn[l]/trunc_attn[l].sum(dim=-1, keepdims=True) for l in range(config.model.num_layers)]
+
+    if mask is not None:
+        if isinstance(mask, torch.Tensor):
+            if mask.dim() >= 2:
+                mask = mask.squeeze()
+            mask = mask.cpu().numpy().tolist()
+            mask = [0 if m == 0 else 1 for m in mask]  # Convert to binary mask
+
     if action == 'view':
-        head_view(trunc_attn, batch[0].tolist()[trunc:], html_action=action)
+        head_view(trunc_attn, mask[trunc:], batch[0].tolist()[trunc:], html_action=action)
     else:
-        return head_view(trunc_attn, batch[0].tolist()[trunc:], html_action=action)
+        return head_view(trunc_attn, mask[trunc:], batch[0].tolist()[trunc:], html_action=action)

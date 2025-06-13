@@ -7,7 +7,7 @@ import os
 
 def get_config() -> ConfigDict:
     config = ConfigDict()
-    config.seq_len = 1024
+    config.seq_len = 256
     config.vocab_size = 10
     config.seed = None
     config.batch_size = 64
@@ -43,8 +43,8 @@ def get_config() -> ConfigDict:
         config.task.fixed = False  # Whether to fix the triggers
     
     elif config.task.name in ["repetition", "reversion", "fuzzy"]:
-        config.task.repeat_length = 16
-        config.task.repeat_prob = 16/config.seq_len  # Probability of repeating the sequence
+        config.task.repeat_length = 25
+        config.task.repeat_prob = 8/config.seq_len  # Probability of repeating the sequence
     
     elif config.task.name == "dyck":
         config.task.dyck_length = 8
@@ -59,13 +59,13 @@ def get_config() -> ConfigDict:
     config.model.bias = False
     config.model.mlp_bias = True
     config.model.ff_dim = 2*64
-    config.model.num_layers = 2
-    config.model.num_heads = (1, 1)  # Tuple of number of heads for each layer
+    config.model.num_layers = 3
+    config.model.num_heads = (1, 1, 1)  # Tuple of number of heads for each layer
     config.model.dropout = None  # Dropout rate, None means no dropout
     config.model.mask = True  # Whether to use masking in attention
-    config.model.mlp = (True, True)  # Tuple indicating whether to use MLP in each layer
+    config.model.mlp = (True, True, True)  # Tuple indicating whether to use MLP in each layer
     config.model.layer_norm = False  # Whether to use layer normalization
-    config.model.activation = (True, True)  # Tuple indicating whether to use activation in each layer
+    config.model.activation = (True, True, True)  # Tuple indicating whether to use activation in each layer
     config.model.pos_enc = "rotary"  # Type of positional encoding
     config.model.pos_max_len = config.seq_len  # Maximum length for positional encoding
     config.model.flash = True  # Whether to use flash attention for faster computation
@@ -76,7 +76,7 @@ def get_config() -> ConfigDict:
     #######################
     
     config.training = ConfigDict()
-    config.training.num_epochs = 24000
+    config.training.num_epochs = 30000
     config.training.learning_rate = 6e-4
     config.training.eval_iter = 100
     config.training.get_attn = 1000

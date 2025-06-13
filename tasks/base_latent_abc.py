@@ -30,7 +30,7 @@ class BaseLatentSequenceTask:
     def _init_task_pool(self):
         raise NotImplementedError("Subclasses must override `_init_task_pool`.")
 
-    def _hidden_state_update(self, x: torch.Tensor) -> torch.Tensor:
+    def _hidden_state_update(self, x: torch.Tensor, flag: torch.Tensor) -> torch.Tensor:
         raise NotImplementedError("Subclasses must override `_hidden_state_update`.")
     
     #def _markov_mask(self, hidden_state):
@@ -43,6 +43,8 @@ class BaseLatentSequenceTask:
     def _get_powers(self, x):
         raise NotImplementedError("Subclasses must override `_get_powers`.")
 
+    def _get_index(self, hidden_state):
+        raise NotImplementedError("Subclasses must override `_get_index`.")
 
     def generate(self, epochs=1, mode="train", num_samples=None, task=None):
         if mode == "train":
@@ -62,9 +64,12 @@ class BaseLatentSequenceTask:
             hidden_values = task * torch.ones(num_samples, dtype=torch.long, device=self.device)
         else:
             if self.total_trans > 0 and mode != "ood":
-                hidden_values = torch.randint(high=self.total_trans, size=(num_samples,), device=self.device)
+                hidden_values_ids = torch.randint(high=self.total_trans, size=(num_samples,), device=self.device)
+                hidden_values = self.task_pool[hidden_values_ids]
             else:
-                hidden_values = torch.randint(high=self.num_states ** (self.total_length), size=(num_samples,), device=self.device)
+                hidden_values = torch.randint(high=self.num_states, size=(num_samples, self.total_length), device=self.device)
+                # powers = (self.num_states ** torch.arange(self.total_length - 1, -1, -1, device=self.device)).long()
+                # hidden_values = torch.sum(hidden_values_seq * powers, dim=1)
 
         hidden_state = (torch.rand(num_samples) < self.repeat_prob).long().to(device=self.device)
 
@@ -79,16 +84,16 @@ class BaseLatentSequenceTask:
 
             samples[use_markov, t] = next_states[use_markov]
 
-            power = self._get_powers(hidden_state[~use_markov])
+            #power = self._get_powers(hidden_state[~use_markov])
 
-            if self.total_trans == 0 or mode == "ood" or task is not None:
-                curr_values = hidden_values[~use_markov] // (self.num_states ** (power))
-                
-            elif self.total_trans > 0:
-                curr_values = self.task_pool[hidden_values[~use_markov]] // (self.num_states ** (power))
+            #if self.total_trans == 0 or mode == "ood" or task is not None:
+            curr_values = hidden_values[~use_markov, self._get_index(hidden_state[~use_markov])] # // (self.num_states ** (power))
 
-            samples[~use_markov, t] = curr_values % self.num_states
-            masks[~use_markov, t] = hidden_state[~use_markov]
+            #elif self.total_trans > 0:
+            #    curr_values = self.task_pool[hidden_values[~use_markov][hidden_state[~use_markov]-1]] #// (self.num_states ** (power))
+            if len(curr_values) > 0:
+                samples[~use_markov, t] = curr_values #% self.num_states
+                masks[~use_markov, t] = hidden_state[~use_markov]
 
             hidden_state = self._hidden_state_update(hidden_state)
 

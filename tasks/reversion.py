@@ -15,14 +15,25 @@ from tasks.base_latent_abc import BaseLatentSequenceTask
 
 class ReversedTask(BaseLatentSequenceTask):
     def _init_task_pool(self):
+        task_pool = torch.randint(high=self.num_states, size=(self.total_trans, self.repeat_length), device=self.device)
+        # powers = (self.num_states ** torch.arange(self.repeat_length - 1, -1, -1, device=self.device)).long()
+        # task_pool = torch.sum(hidden_values_seq * powers, dim=1)
+        '''
         task_pool = torch.randint(
             low=0,
             high=self.num_states ** self.repeat_length,
             size=(self.total_trans,),
             device=self.device
         )
+        '''
         
         return task_pool
+    
+    def _get_index(self, hidden_state):
+        x = hidden_state.clone()
+        total = 2*self.repeat_length + 1
+        x[x > self.repeat_length] = total - x[x > self.repeat_length]
+        return x - 1
 
     def _hidden_state_update(self, x: torch.Tensor) -> torch.Tensor:
         L = self.repeat_length
@@ -46,8 +57,8 @@ class ReversedTask(BaseLatentSequenceTask):
         replace_mask = neg_mask & flip_mask
         x[replace_mask] = L+1
 
-        # Step 3: wrap around values greater than 2L to 0 and values equal to -2 to -1
-        x[x > (2*L)] = 0
+        # Step 3: wrap around values greater than 2L to -3 and values equal to -2 to -1
+        x[x > (2*L)] = -3
         x[x == -2] = -1
 
         return x

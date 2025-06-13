@@ -83,6 +83,7 @@ require.config({
   
           // Load parameters
           const attnData = config.attention[config.filter];
+          const mask = attnData.mask;
           const leftText = attnData.left_text;
           const rightText = attnData.right_text;
   
@@ -100,8 +101,8 @@ require.config({
               .attr("height", height + "px");
   
           // Display tokens on left and right side of visualization
-          renderText(svg, leftText, true, layerAttention, 0);
-          renderText(svg, rightText, false, layerAttention, MATRIX_WIDTH + BOXWIDTH);
+          renderText(svg, leftText, mask, true, layerAttention, 0);
+          renderText(svg, rightText, mask, false, layerAttention, MATRIX_WIDTH + BOXWIDTH);
   
           // Render attention arcs
           renderAttention(svg, layerAttention);
@@ -110,7 +111,7 @@ require.config({
           drawCheckboxes(0, svg, layerAttention);
       }
   
-      function renderText(svg, text, isLeft, attention, leftPos) {
+      function renderText(svg, text, mask, isLeft, attention, leftPos) {
   
           const textContainer = svg.append("svg:g")
               .attr("id", isLeft ? "left" : "right");
@@ -153,6 +154,7 @@ require.config({
               .attr("y", (d, i) => TEXT_TOP + i * BOXHEIGHT)
               .attr("width", BOXWIDTH)
               .attr("height", BOXHEIGHT);
+
   
           // Add token text
           const textEl = tokenContainer.append("text")
@@ -161,7 +163,8 @@ require.config({
               .style("cursor", "default")
               .style("-webkit-user-select", "none")
               .attr("x", leftPos)
-              .attr("y", (d, i) => TEXT_TOP + i * BOXHEIGHT);
+              .attr("y", (d, i) => TEXT_TOP + i * BOXHEIGHT)
+              .style("fill", (d, i) => mask[i] > 0 ? "red" : "black");  // ← color logic here
   
           if (isLeft) {
               textEl.style("text-anchor", "end")

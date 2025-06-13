@@ -543,7 +543,7 @@ def train_markov(model, config, verbose=False):
             outputs = outputs[:, :-1, :].reshape(-1, config.vocab_size)
             batch_info = batch_info[:, :-1].reshape(-1)
             loss = criterion(outputs, targets)
-            task_loss = criterion(outputs[batch_info > 0], targets[batch_info > 0])
+            task_loss = criterion(outputs[batch_info > config.task.repeat_length], targets[batch_info > config.task.repeat_length])
             # if is_icl:
             #    last_token_losses.append(last_token_loss(last_token, batch_info).item())
             
@@ -586,8 +586,8 @@ def train_markov(model, config, verbose=False):
                     eval_loss = criterion(outputs, test_target)
                     log["eval/loss"].append(eval_loss.item())
                     wandb.log({"eval/loss": eval_loss.item()}, step=step)
-                    eval_task_loss = criterion(outputs[test_info > 0], test_target[test_info > 0])
-                    eval_task_acc = (outputs[test_info > 0].argmax(dim=-1) == test_target[test_info > 0]).float().mean().item()
+                    eval_task_loss = criterion(outputs[test_info > config.task.repeat_length], test_target[test_info > config.task.repeat_length])
+                    eval_task_acc = (outputs[test_info > config.task.repeat_length].argmax(dim=-1) == test_target[test_info > config.task.repeat_length]).float().mean().item()
                     log["eval/IDLoss"].append(eval_task_loss.item())
                     log["eval/IDAcc"].append(eval_task_acc)
                     wandb.log({"eval/IDLoss": eval_task_loss.item()}, step=step)
@@ -596,8 +596,8 @@ def train_markov(model, config, verbose=False):
                     if config.task.ood:
                         ood_outputs, _ = model(ood_batch)
                         ood_outputs = ood_outputs[:, :-1, :].reshape(-1, config.vocab_size)
-                        ood_loss = criterion(ood_outputs[ood_mask > 0], ood_target[ood_mask > 0])
-                        ood_acc = (ood_outputs[ood_mask > 0].argmax(dim=-1) == ood_target[ood_mask > 0]).float().mean().item()
+                        ood_loss = criterion(ood_outputs[ood_mask > config.task.repeat_length], ood_target[ood_mask > config.task.repeat_length])
+                        ood_acc = (ood_outputs[ood_mask > config.task.repeat_length].argmax(dim=-1) == ood_target[ood_mask > config.task.repeat_length]).float().mean().item()
                         log["eval/OODLoss"].append(ood_loss.item())
                         log["eval/OODAcc"].append(ood_acc)
                         wandb.log({"eval/OODLoss": ood_loss.item()}, step=step)
@@ -679,11 +679,11 @@ def train_model_with_plot(model, config, show=False):
 
     if show:
         trunc = max(config.seq_len - 64, 0) # show the last 64 tokens
-        get_head_view(model, train_results, config, trunc=trunc, action="view")
-    
-    
-    html = get_head_view(model, train_results, config, trunc=0, action="return")
-    
+        get_head_view(model, config, train_results=train_results, trunc=trunc, action="view")
+
+
+    html = get_head_view(model, config, train_results=train_results, trunc=0, action="return")
+
     html_file_name = os.path.join(attn_folder, "attn_view.html")
     with open(html_file_name, "w", encoding="utf-8") as file:
         file.write(html)
