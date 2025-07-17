@@ -1,40 +1,6 @@
-# Instructions
+# Instructions (Outdated!)
 
 To run the current ongoing experiments, see notebooks [TriggerMarkov.ipynb](./TriggerMarkov.ipynb) for random triggers, [LatentModel.ipynb](./LatentModel.ipynb) for latent markov models and [Linear.ipynb](./Linear.ipynb) for linear regression. Use [config.py](./config.py) to specify experiment configurations. Experiment results are stored in the [results](./results/) folder, where plots and experiment configurations can be found. Model checkpoints are available on [Googl Drive](https://drive.google.com/file/d/1M4gCmQ1z3tdG2Z0PlLsi_MBYFWyieHmj/view?usp=drive_link). 
-
-The structure of this repositary is roughly summarized in the following file tree (might be outdated):
-
-```
-ICL/
-├── checkpoints/          # checkpoints for models
-├── tasks/
-│   ├── markov.py         # classes for different task samplers. 
-│   ├── causal_graph.py   # legacy class for causal graph samplers.
-│   ├── markov_latent.py  # classes for the latent markov task sampler. 
-│   └── other files       # legacy files / utils or still under development.
-│ 
-│   
-├── models/
-│   ├── ngram_*.py        # empircal n-gram learners, used to provide baselines.
-│   ├── attention.py      # implementation of multi-head attention. 
-│   ├── base_models.py    # implementation of the base transformer model.
-│   ├── pos_encoder.py    # implementation of different positional encoding classes.
-│   └── sae.py            # sparse autoencoder, not in use currently.
-├── figures/
-│   ├── head_view.py      # Bertviz-type attention visualization.
-│   ├── view_util.py      # Bertviz-type attention visualization utility file.
-│   ├── head_view.js      # Bertviz-type attention visualization javascript.
-│   ├── test_head_view.js # failed attempt to transpose Bertviz-type attention visualization.
-│   └── plot.py           # create plots for training loss/ memory probes/ average attention pattern/ etc.
-│ 
-├── TriggerMarkov.ipynb   # Entry point to run random trigger experiments.
-├── LatentModel.ipynb     # Entry point to run latent markov experiments.
-├── train.py              # trains the model, generates training statistics and creates plots.
-├── config.py             # configuration classes for sampler and tasks.
-├── train_utils.py        # some utilities to get training loss and memory probe statistics. 
-├── util.py               # implementation of different probes.
-└── README.md
-```
 
 
 ## Legacy (Outdated)
