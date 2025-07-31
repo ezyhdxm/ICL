@@ -2,10 +2,12 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+# import nvtx
 # from torch.nn.attention.flex_attention import flex_attention, create_block_mask
+
 from .pos_encoder import *
 
-# TODO: Add MLA, MQA, GQA
+# TODO: Add MLA
 
 # causal mask for flex_attention, not in use yet. 
 # flex_attention is a fast implementation of multihead attention. 
@@ -27,6 +29,10 @@ class MultiHeadAttention(nn.Module):
         self.emb_dim = config.model.emb_dim
         self.n_head = config.model.num_heads[layer]
         self.head_dim = self.emb_dim // self.n_head
+        self.attn_type = config.model.attention_type if hasattr(config.model, 'attention_type') else "MHA"
+        if self.attn_type == "GQA":
+            self.g = config.model.attn_groups if hasattr(config.model, 'attn_groups') else 2
+
         
         assert self.emb_dim % self.n_head == 0, "Embedding dimension must be divisible by the number of heads."
         
@@ -35,9 +41,17 @@ class MultiHeadAttention(nn.Module):
         else:
             self.query = nn.Linear(self.emb_dim, self.emb_dim, bias=config.model.bias)
         
-        self.key = nn.Linear(self.emb_dim, self.emb_dim, bias=config.model.bias)
+        if self.attn_type == "MQA":
+            self.key = nn.Linear(self.emb_dim, self.head_dim, bias=config.model.bias)
+            self.value = nn.Linear(self.emb_dim, self.head_dim, bias=config.model.bias)
+        elif self.attn_type == "MHA":
+            self.key = nn.Linear(self.emb_dim, self.emb_dim, bias=config.model.bias)
+            self.value = nn.Linear(self.emb_dim, self.emb_dim, bias=config.model.bias)
+        elif self.attn_type == "GQA":
+            self.key = nn.Linear(self.emb_dim, self.g * self.head_dim, bias=config.model.bias)
+            self.value = nn.Linear(self.emb_dim, self.g * self.head_dim, bias=config.model.bias)
+            self.register_buffer("head_to_group", torch.arange(self.n_head) // (self.n_head // self.g))
         
-        self.value = nn.Linear(self.emb_dim, self.emb_dim, bias=config.model.bias)
         if config.training.freeze_value: self.value.weight.requires_grad_(False)
         
         self.out = nn.Linear(self.emb_dim, self.emb_dim, bias=config.model.bias)
@@ -65,12 +79,22 @@ class MultiHeadAttention(nn.Module):
         
         elif self.pos_enc == "alibi":
             self.alibi_emb = AliBiPositionalEncoding(self.n_head)
-        
+    
     def forward(self, x): # x: (B,T,C)
         batch_size, seq_len, _ = x.size()
         Q = self.query(x).view(batch_size, seq_len, self.n_head, self.head_dim).transpose(1,2) # (B,H,T,D)
-        K = self.key(x).view(batch_size, seq_len, self.n_head, self.head_dim).transpose(1,2) # (B,H,T,D)
-        V = self.value(x).view(batch_size, seq_len, self.n_head, self.head_dim).transpose(1,2) # (B,H,T,D)
+        if self.attn_type == "MQA":
+            # Multi-query attention: only one key and value projection
+            K = self.key(x).view(batch_size, seq_len, 1, self.head_dim).transpose(1,2)
+            V = self.value(x).view(batch_size, seq_len, 1, self.head_dim).transpose(1,2)
+        elif self.attn_type == "MHA":
+            K = self.key(x).view(batch_size, seq_len, self.n_head, self.head_dim).transpose(1,2) # (B,H,T,D)
+            V = self.value(x).view(batch_size, seq_len, self.n_head, self.head_dim).transpose(1,2) # (B,H,T,D)
+        elif self.attn_type == "GQA":
+            K = self.key(x).view(batch_size, seq_len, self.g, self.head_dim).transpose(1,2) # (B,G,T,D)
+            V = self.value(x).view(batch_size, seq_len, self.g, self.head_dim).transpose(1,2) # (B,G,T,D)
+            K = K[:, self.head_to_group]  # (B, H, T, D)
+            V = V[:, self.head_to_group]  # (B, H, T, D)
         
         if self.pos_enc == "rotary":                                
             # expected shape for apply_rotary_emb: (batch_size, max_seq_len, num_head, d_head)

@@ -315,7 +315,7 @@ def create_jupyter_widget_viewer(attns):
     
     # Create statistics checkbox
     show_stats = widgets.Checkbox(
-        value=True,
+        value=False,
         description='Show Statistics',
         disabled=False
     )

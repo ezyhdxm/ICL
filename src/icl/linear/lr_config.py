@@ -6,7 +6,7 @@ import os
 def get_config() -> ConfigDict:
     config = ConfigDict()
     NDIMS = 6
-    NPOINTS = 100
+    NPOINTS = 96
 
     config.dtype = "float32"
     config.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -24,12 +24,14 @@ def get_config() -> ConfigDict:
     config.task.data_scale = 1.0
     config.task.task_scale = 1.0
     config.task.noise_scale = 0.5
+    config.task.p_ood = 0.1  # Probability of out-of-distribution tasks
 
     config.model = ConfigDict()
     config.model.name = "transformer"
+    config.model.activation = "gelu"  # Activation function for the model
     config.model.n_points = NPOINTS
     config.model.n_dims = NDIMS
-    config.model.n_layer = 3
+    config.model.n_layer = 4
     config.model.n_embd = 128
     config.model.n_head = 1
     config.model.seed = 100
@@ -37,15 +39,15 @@ def get_config() -> ConfigDict:
 
     config.training = ConfigDict()
     config.training.optimizer = "adamw"
-    config.training.lr = 5e-4
+    config.training.lr = 1e-4
     config.training.schedule = "triangle"
     config.training.weight_decay = 1e-2
     config.training.warmup_steps = 12_000
     config.training.total_steps = 24_000
 
     config.eval = ConfigDict()
-    config.eval.n_samples = 2**12
-    config.eval.batch_size = 128
+    config.eval.n_samples = 2**13
+    config.eval.batch_size = 1024
     config.eval.data_seed = 104
     config.eval.task_seed = 105
     config.eval.noise_seed = 106

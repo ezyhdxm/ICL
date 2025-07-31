@@ -39,6 +39,7 @@ class GPT2Config:
     bias: bool = True
     dtype: Any = torch.float32
     device: str = "cpu"
+    activation: str = "gelu"  # Activation function for the model
 
 
 class GPT2SelfAttention(nn.Module):
@@ -79,14 +80,29 @@ class GPT2SelfAttention(nn.Module):
 class GPT2MLP(nn.Module):
     def __init__(self, config: GPT2Config):
         super().__init__()
-        self.c_fc = nn.Linear(config.n_embd, 4 * config.n_embd, bias=config.bias)
-        self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.bias)
+        self.activation = config.activation
+        if self.activation  != "linear":
+            self.c_fc = nn.Linear(config.n_embd, 4 * config.n_embd, bias=config.bias)
+            self.c_proj = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.bias)
+        else:
+            self.c_ff = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
         self.dropout = nn.Dropout(config.dropout)
+        
 
     def forward(self, x):
-        x = self.c_fc(x)
-        x = F.gelu(x)
-        x = self.c_proj(x)
+        if self.activation == "linear":
+            x = self.c_ff(x)
+        else:
+            x = self.c_fc(x)
+            if self.activation == "gelu":
+                x = F.gelu(x)
+            elif self.activation == "relu":
+                x = F.relu(x)
+            elif self.activation == "swish":
+                x = x * torch.sigmoid(x)
+            elif self.activation == "silu":
+                x = F.silu(x)
+            x = self.c_proj(x)
         x = self.dropout(x)
         return x
     

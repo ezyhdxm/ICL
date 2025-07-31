@@ -8,7 +8,11 @@ from plotly.subplots import make_subplots
 import numpy as np
 from ipywidgets import interact, Dropdown
 import ipywidgets as widgets
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Union, Optional, Tuple
+import itertools
+from tqdm.notebook import trange
+from sklearn import linear_model
+import cvxpy as cp
 
 from icl.linear.lr_models import DiscreteMMSE, Ridge
 from icl.linear.lr_task import *
@@ -23,7 +27,7 @@ def find_task_vector_with_baseline(
     l0=0,
     num_epochs=3000,
     lr=1e-3,
-    pad="bos",
+    pad="mapsto",
     verbose=True,
     return_baseline=False,
     l2_reg=1e-2,
@@ -151,26 +155,103 @@ def extract_task_vector(
     hook_handle.remove()
     return extracted_vector['vector']
 
+def extract_weak_task_vector(
+        model, demo_data, demo_target, l=0, task_pos=-1
+    ):
+    extracted_vector = {}
+
+    def hook_fn(module, input, output):
+        # output: (batch, seq_len, d_model)
+        extracted_vector['diff'] = output[:, task_pos, :].detach().clone() - input[:, task_pos, :].detach().clone()
+        extracted_vector['input'] = input[:, task_pos, :].detach().clone()
+
+    hook_handle = model.transformer.blocks[l].attn_block.register_forward_hook(hook_fn)
+    with torch.no_grad(): _ = model(demo_data, demo_target)
+    hook_handle.remove()
+
+    attn_map = get_attn_at_layer(model, demo_data, demo_target, l)
+
+    return extracted_vector['vector']
+
+
+def compute_task_vectors(config,
+                         model: torch.nn.Module,
+                         train_task,
+                         layer_index: int = 1) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Extracts task vectors for all tasks using a given model and data generator.
+
+    Parameters:
+    -----------
+    config : ConfigDict
+        Configuration object containing task/model setup.
+    model : torch.nn.Module
+        The model used to extract task vectors.
+    train_task : object
+        Object that supports `.sample_from_task()` and has a `.task_pool` list.
+    layer_index : int, default=1
+        The layer at which task vectors are extracted.
+
+    Returns:
+    --------
+    task_vectors : torch.Tensor
+        Tensor of shape (n_tasks, n_points - 1, batch_size, n_embd)
+    """
+    n_tasks = config.task.n_tasks
+    n_points = config.task.n_points
+    batch_size = train_task.batch_size
+    n_embd = config.model.n_embd
+
+    task_vectors = torch.zeros((n_tasks, n_points - 1, batch_size, n_embd))
+
+    for k in trange(n_tasks):
+        if hasattr(train_task, "centroid1"):
+            demo_data, demo_labels, demo_target = train_task.sample_from_task(train_task.task_pool1[k], train_task.task_pool2[k], step=1)
+        else:
+            demo_data, demo_target = train_task.sample_from_task(train_task.task_pool[k], step=1)
+        task_pos = 3 * torch.arange(1, n_points) + 1  # Position of task tokens
+        task_vec = extract_task_vector(
+            model=model,
+            demo_data=demo_data,
+            demo_target=demo_target,
+            l=layer_index,
+            task_pos=task_pos
+        )
+        task_vectors[k] = task_vec.cpu().transpose(0, 1)
+
+    return task_vectors, demo_data
+
+
+
+
+
 
 def predict_with_task_vector(
-        model, query_data, query_target, task_vector, l=0, pad="bos", 
+        model, query_data, query_target, task_vector, l=0, pad="mapsto", is_diff=False,
         optimize=False, lr=1e-3, num_epochs=5, train_task=None, task_idx=None, verbose=False, pos=1
     ):
     if pad == "bos": 
         task_pos=0 
     else:
         task_pos = pos
+    
+    if task_vector.device != model.device:
+        task_vector = task_vector.to(model.device)
 
     if optimize:
         assert train_task is not None, "train_task must be provided for optimization"
         assert task_idx is not None, "task_idx must be provided for optimization"
-        alpha = nn.Parameter(torch.tensor(0.01, device=task_vector.device))
+        alpha = nn.Parameter(torch.tensor(0.05, device=task_vector.device))
         optimizer = torch.optim.Adam([alpha], lr=lr)
     else:
         alpha = 1.0
 
     def inject_hook(module, input, output):
-        output[:, task_pos, :] = alpha * task_vector
+        
+        if not is_diff:
+            output[:, task_pos, :] = alpha * task_vector
+        else:
+            output[:, task_pos, :] += alpha * task_vector
         return output
     
     hook_handle = model.transformer.blocks[l].attn_block.register_forward_hook(inject_hook)
@@ -198,6 +279,16 @@ def predict_with_task_vector(
         hook_handle.remove()
 
     return preds
+
+
+
+
+
+
+
+
+
+
 
 def extract_task_vector_diff(
         model, demo_data, demo_target, l=0, task_pos=-1, init_pos=1
@@ -240,7 +331,7 @@ def weighted_average_favor_late_batched(
     x: torch.Tensor, 
     mode="linear", 
     alpha=0.1, 
-    cap_threshold: int = None
+    cap_threshold: Optional[int] = None
 ):
     """
     x: Tensor of shape (B, T, D)
@@ -293,6 +384,81 @@ def moving_l2_distance_from_mean_sumD(x: torch.Tensor, window_size: int, sqrt: b
     return reduced
 
 
+
+def get_dmmse_posterior(train_task, k):
+    task_pool = train_task.task_pool.unsqueeze(-1)  # (n_tasks, D)
+    noise_scale = train_task.noise_scale
+    xs, ys = train_task.sample_from_task(train_task.task_pool[k], step=0)
+    B, T, D = xs.shape
+    K = task_pool.shape[0]
+
+    lognum = torch.zeros((B, K), device=xs.device, dtype=xs.dtype)
+    posterior = torch.zeros((B, T, K), device=xs.device, dtype=xs.dtype)
+    posterior[:, 0, :] = 1.0 / K  # uniform prior at t=0
+
+    for t in range(T-1):
+        curr_log = (ys[:,t].unsqueeze(1) - (xs[:,t] @ task_pool.T)).pow(2) / (2 * noise_scale ** 2)
+        lognum -= curr_log.squeeze(0).squeeze(0)
+        logdenom = torch.logsumexp(lognum, dim=1)
+        posterior[:, t+1] = torch.exp(lognum - logdenom[:, None])
+    
+    return posterior, xs
+
+
+def estimate_lambda_with_r2(task_vecs, task_vecs_over_all_time):
+    """
+    Estimate lambda_{j', t}^{(j)} with constraints and return R² of the fit.
+
+    Returns:
+        lambdas: (k, seq_len, num_tasks)
+        r2_scores: (k, seq_len) -- R² value per fit
+    """
+    k, seq_len, d = task_vecs_over_all_time.shape
+    num_tasks = task_vecs.shape[0]
+    lambdas = np.zeros((k, seq_len, num_tasks))
+    r2_scores = np.zeros((k, seq_len))
+
+    X = task_vecs.T  # shape (d, num_tasks)
+    lambda_var = cp.Variable(num_tasks)
+    constraints = [lambda_var >= 1e-8, cp.sum(lambda_var) == 1]
+
+    for j in range(k):
+        for t in range(seq_len):
+            y = task_vecs_over_all_time[j, t, :]  # shape (d,)
+            objective = cp.Minimize(cp.sum_squares(X @ lambda_var - y))
+            prob = cp.Problem(objective, constraints)
+            prob.solve()
+
+            if lambda_var.value is None:
+                raise ValueError(f"cvxpy solver failed at j={j}, t={t}")
+
+            lambdas[j, t, :] = lambda_var.value
+
+            y = np.asarray(y)
+            # Goodness of fit
+            y_pred = X @ lambda_var.value
+            y_pred = np.asarray(y_pred)
+            ss_res = np.sum((y - y_pred) ** 2)
+            ss_tot = np.sum((y - y.mean()) ** 2)
+            r2_scores[j, t] = 1 - ss_res / ss_tot if ss_tot > 0 else np.nan
+
+    return lambdas, r2_scores
+
+
+
+
+
+
+
+
+
+
+#######################
+# Attention Extraction Functions #
+#######################
+
+
+
 def get_attn(model, data, target):
     attns = {}
     
@@ -340,6 +506,51 @@ def get_attn(model, data, target):
         handle.remove()
     
     return attns
+
+def get_filtered_attn_output_at_layer(model, data, target, l, task_pos=-1):
+    filtered_output = {}
+    
+    def hook_fn(module, input, output):
+        # Get the input to the attention module
+        x = input[0]
+        batch_size, seq_len, _ = x.size()
+        
+        # Compute Q, K, V
+        Q = module.query(x).view(batch_size, seq_len, module.n_head, module.head_dim).transpose(1,2)
+        K = module.key(x).view(batch_size, seq_len, module.n_head, module.head_dim).transpose(1,2)
+        V = module.value(x).view(batch_size, seq_len, module.n_head, module.head_dim).transpose(1,2)
+        
+        # Apply rotary embeddings
+        Q, K = apply_rotary_emb(Q.transpose(1, 2), K.transpose(1, 2), freqs_cis=module.freqs_cis[:seq_len])
+        Q, K = Q.transpose(1, 2), K.transpose(1, 2)
+        
+        # Compute attention weights
+        scale = 1.0 / (module.head_dim ** 0.5)
+        attn_weights = torch.matmul(Q, K.transpose(-2, -1)) * scale
+        
+        # Apply causal mask
+        mask = torch.triu(torch.ones(seq_len, seq_len, device=x.device), diagonal=1).bool()
+        attn_weights.masked_fill_(mask, float('-inf'))
+        
+        # Softmax to get attention probabilities
+        attn_weights = F.softmax(attn_weights, dim=-1)
+        
+        attn_weights[:, :, task_pos, task_pos] = 0  # Zero out attention to the task position
+        attn_weights[:, :, task_pos, task_pos-1] = 0  # Zero out attention to the task position
+        out = attn_weights @ V  # (B, H, T, D)
+        out = out.transpose(1,2).contiguous().view(batch_size,seq_len,-1) # (B,T,C)
+        out = module.out(out)
+        filtered_output[l] = out.detach().squeeze(0)
+    
+    handle = model.transformer.blocks[l].attn_block.attn.register_forward_hook(hook_fn)
+    
+    with torch.no_grad():
+        _ = model(data, target)
+    
+    # Clean up hooks
+    handle.remove()
+    
+    return filtered_output
 
 #########################
 # Plotting Functions    #
@@ -640,7 +851,7 @@ def create_interactive_plot(task_vectors, ws_dmmse, ws_re, window_size=10, cap=1
 
 def analyze_tasks(config: Dict[str, Any], 
                   model, 
-                  data_type,
+                  data_type = torch.float32,
                   batch_size: int = 1024,
                   layer_index: int = 0, 
                   pos: int = 1,
@@ -668,6 +879,8 @@ def analyze_tasks(config: Dict[str, Any],
         - ws_dmmse: Shape (n_tasks, n_points-1, batch_size, n_dims)
         - ws_re: Shape (n_tasks, n_points-1, batch_size, n_dims)
     """
+
+    model = model.to(config.device)
     
     # Initialize task
     train_task = get_task(**config["task"], dtype=data_type)
@@ -698,7 +911,7 @@ def analyze_tasks(config: Dict[str, Any],
                data_type)
 
     # Process each task
-    for k in range(config.task.n_tasks):
+    for k in trange(config.task.n_tasks):
         # Sample data from current task
         demo_data, demo_target = train_task.sample_from_task(
             train_task.task_pool[k], 
@@ -741,117 +954,6 @@ def analyze_tasks(config: Dict[str, Any],
 
 
 
-import torch
-import itertools
-import numpy as np
-import plotly.graph_objects as go
-from typing import Union
-
-def plot_task_vector_differences(task_vectors: torch.Tensor,
-                                  save_path: Union[str, None] = "tdiff_mean_plot.png") -> None:
-    """
-    Compute and plot the norm of mean task vector differences over all task pairs.
-
-    Parameters:
-    -----------
-    task_vectors : torch.Tensor
-        Tensor of shape (n_tasks, sequence_length, embedding_dim)
-    save_path : str or None
-        If given, saves the plot to this file.
-    """
-
-    n_tasks = task_vectors.shape[0]
-    tvd_means = []
-
-    # Compute mean difference vector norm across positions
-    for i, j in itertools.combinations(range(n_tasks), 2):
-        tvs_diff = task_vectors[i] - task_vectors[j]  # shape: (seq_len, emb_dim)
-        tvd_mean = tvs_diff.mean(dim=1).norm(dim=-1)  # shape: (seq_len,)
-        tvd_means.append(((i, j), tvd_mean.cpu().numpy()))
-
-    # Plot with Plotly
-    fig = go.Figure()
-    for (i, j), tvd_mean in tvd_means:
-        x = np.arange(1, len(tvd_mean) + 1)
-        fig.add_trace(go.Scatter(
-            x=x,
-            y=tvd_mean,
-            mode='lines',
-            name=f"Task {i}-{j}",
-            opacity=0.5,
-            line=dict(width=1)
-        ))
-
-    fig.update_layout(
-        title="Mean of Task Vector Differences vs Position",
-        xaxis_title="Position",
-        yaxis_title="Norm",
-        width=800,
-        height=500,
-        template="plotly_white"
-    )
-
-    if save_path:
-        fig.write_image(save_path, scale=3)
-
-    fig.show()
-
-
-import torch
-import itertools
-import numpy as np
-import plotly.graph_objects as go
-from typing import Union
-
-def plot_pairwise_task_vector_variance(task_vectors: torch.Tensor,
-                                       save_path: Union[str, None] = "tdiff_var_plot.png") -> None:
-    """
-    Compute and plot the per-position variance of task vector differences across all task pairs.
-
-    Parameters:
-    -----------
-    task_vectors : torch.Tensor
-        Tensor of shape (n_tasks, sequence_length, embedding_dim)
-    save_path : str or None
-        If specified, the plot is saved to this path (e.g., .png or .pdf). If None, it is not saved.
-    """
-
-    n_tasks = task_vectors.shape[0]
-    pairwise_tvars = []
-
-    # Compute variance of difference vectors per pair
-    for i, j in itertools.combinations(range(n_tasks), 2):
-        tvs_diff = task_vectors[i] - task_vectors[j]  # (seq_len, emb_dim)
-        tsds_diff = (tvs_diff - tvs_diff.mean(dim=-2, keepdim=True)).norm(dim=-1)
-        tvars_diff = (tsds_diff**2).mean(dim=-1).cpu().numpy()  # (seq_len,)
-        pairwise_tvars.append(((i, j), tvars_diff))
-
-    # Plot with Plotly
-    fig = go.Figure()
-    for (i, j), tvars_diff in pairwise_tvars:
-        x = np.arange(1, len(tvars_diff) + 1)
-        fig.add_trace(go.Scatter(
-            x=x,
-            y=tvars_diff,
-            mode='lines',
-            name=f"Task {i}-{j}",
-            opacity=0.5,
-            line=dict(width=1)
-        ))
-
-    fig.update_layout(
-        title="Variance of Task Vector Differences vs Position",
-        xaxis_title="Position",
-        yaxis_title="Variance",
-        width=800,
-        height=500,
-        template="plotly_white"
-    )
-
-    if save_path:
-        fig.write_image(save_path, scale=3)
-
-    fig.show()
 
 
 
@@ -859,141 +961,3 @@ def plot_pairwise_task_vector_variance(task_vectors: torch.Tensor,
 
 
 
-
-
-
-
-
-import torch
-import numpy as np
-import plotly.graph_objects as go
-from scipy.optimize import curve_fit
-from typing import Union
-
-def plot_task_vector_variance_with_fit(task_vectors: torch.Tensor,
-                                       save_path: Union[str, None] = "tvar_plot.png") -> None:
-    """
-    Plot hidden vector variance vs. position across tasks, with a fitted power-law curve.
-
-    Parameters:
-    -----------
-    task_vectors : torch.Tensor
-        Tensor of shape (n_tasks, sequence_length, embedding_dim)
-    save_path : str or None
-        If provided, the plot is saved to this file (e.g., "tvar_plot.png"). If None, no file is saved.
-    """
-
-    # Step 1: Compute per-task variance over embedding dim
-    tvs_means = task_vectors.mean(dim=-2, keepdim=True)  # mean over sequence
-    tsds = (task_vectors - tvs_means).norm(dim=-1)       # shape: (n_tasks, seq_len)
-    tvars = (tsds**2).mean(dim=-1).cpu().numpy()         # shape: (n_tasks, seq_len)
-    
-    x = np.arange(1, tvars.shape[1] + 1)                 # Position index
-    mean_tvar = tvars.mean(axis=0)
-
-    # Step 2: Power-law model
-    def power_law_model(x, a, c, b):
-        return a * x**c + b
-
-    fit_successful = False
-    try:
-        popt, _ = curve_fit(power_law_model, x, mean_tvar, p0=(1.0, -1.0, 0.0), maxfev=10000)
-        a_fit, c_fit, b_fit = popt
-        fitted_curve = power_law_model(x, *popt)
-        fit_successful = True
-    except (RuntimeError, ValueError) as e:
-        print(f"[Warning] curve_fit failed: {e}")
-        fitted_curve = None
-
-    # Step 3: Plotting
-    fig = go.Figure()
-
-    # Plot each task
-    for i in range(tvars.shape[0]):
-        fig.add_trace(go.Scatter(
-            x=x,
-            y=tvars[i],
-            mode='lines',
-            opacity=0.5,
-            name=f"Task {i}" if i < 5 else None,
-            showlegend=i < 5,
-            line=dict(width=1)
-        ))
-
-    # Plot fitted curve
-    if fit_successful and fitted_curve is not None:
-        label_text = f"$\\mathrm{{Fit}}: {a_fit:.2f} \\cdot x^{{{c_fit:.2f}}} {'-' if b_fit < 0 else '+'} {abs(b_fit):.2f}$"
-        fig.add_trace(go.Scatter(
-            x=x,
-            y=fitted_curve,
-            mode='lines',
-            line=dict(color='red', dash='dash', width=2),
-            opacity=0.8,
-            name=label_text
-        ))
-
-    fig.update_layout(
-        title="Hidden Vector Variance vs Position",
-        xaxis_title="Position",
-        yaxis_title="Variance",
-        width=800,
-        height=600,
-        template="plotly_white"
-    )
-
-    if save_path:
-        fig.write_image(save_path, scale=3)
-
-    fig.show()
-
-
-
-def compute_task_vectors(config,
-                         model: torch.nn.Module,
-                         train_task,
-                         layer_index: int = 1) -> torch.Tensor:
-    """
-    Extracts task vectors for all tasks using a given model and data generator.
-
-    Parameters:
-    -----------
-    config : ConfigDict
-        Configuration object containing task/model setup.
-    model : torch.nn.Module
-        The model used to extract task vectors.
-    train_task : object
-        Object that supports `.sample_from_task()` and has a `.task_pool` list.
-    extract_task_vector_fn : Callable
-        A function that extracts task vectors from the model. Should accept:
-        model, demo_data, demo_target, l, task_pos
-    layer_index : int, default=1
-        The layer at which task vectors are extracted.
-
-    Returns:
-    --------
-    task_vectors : torch.Tensor
-        Tensor of shape (n_tasks, n_points - 1, batch_size, n_embd)
-    """
-    n_tasks = config.task.n_tasks
-    n_points = config.task.n_points
-    batch_size = train_task.batch_size
-    n_embd = config.model.n_embd
-
-    task_vectors = torch.zeros((n_tasks, n_points - 1, batch_size, n_embd))
-
-    for k in range(n_tasks):
-        if hasattr(train_task, "centroid1"):
-            demo_data, demo_labels, demo_target = train_task.sample_from_task(train_task.task_pool1[k], train_task.task_pool2[k], step=1)
-        else:
-            demo_data, demo_target = train_task.sample_from_task(train_task.task_pool[k], step=1)
-        task_pos = 3 * torch.arange(1, n_points) + 1  # Position of task tokens
-        task_vec = extract_task_vector(
-            model=model,
-            demo_data=demo_data,
-            demo_target=demo_target,
-            l=layer_index,
-            task_pos=task_pos
-        )
-        task_vectors[k] = task_vec.cpu().transpose(0, 1)
-
-    return task_vectors

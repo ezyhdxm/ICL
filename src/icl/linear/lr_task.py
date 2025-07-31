@@ -14,6 +14,7 @@ class NoisyLinearRegression:
     n_tasks: int
     n_dims: int
     n_points: int
+    p_ood: float
     batch_size: int
     data_seed: int
     task_seed: int
@@ -54,12 +55,20 @@ class NoisyLinearRegression:
         shape = (self.batch_size, self.n_points, self.n_dims)
         return torch.randn(shape, generator=gen, dtype=self.dtype) * self.data_scale
     
-    def sample_tasks(self, step: int) -> torch.Tensor:
+    def sample_tasks(self, step: int, eval: bool=False) -> torch.Tensor:
         # sample a batch of tasks w1, w2, ..., wB from the task pool, where B = batch_size
         gen = torch.Generator().manual_seed(self.task_seed + step)
         if self.n_tasks > 0:
+            assert self.task_pool is not None, "Task pool must be initialized"
             idxs = torch.randint(low=0, high=self.n_tasks, size=(self.batch_size,), generator=gen) # (batch_size,)
             tasks = self.task_pool[idxs]
+            if not eval and self.p_ood > 0:
+                ood_mask = torch.rand(self.batch_size) < self.p_ood
+                n_ood = int(ood_mask.sum().item())
+                ood_shape = (n_ood, self.n_dims, 1)
+                ood_tasks = torch.randn(ood_shape, generator=gen, dtype=self.dtype) * self.task_scale
+                if n_ood > 0:
+                    tasks[ood_mask] = ood_tasks
         else:
             # infinite task pool
             shape = (self.batch_size, self.n_dims, 1)
@@ -74,9 +83,9 @@ class NoisyLinearRegression:
         noise = torch.randn(targets.shape, dtype=targets.dtype, device=targets.device, generator=gen) * self.noise_scale
         return targets + noise
 
-    def sample_batch(self, step: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def sample_batch(self, step: int, eval: bool=False) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         data = self.sample_data(step)
-        tasks = self.sample_tasks(step)
+        tasks = self.sample_tasks(step, eval)
         targets = self.evaluate(data, tasks, step)
         return data, tasks, targets
     

@@ -1,19 +1,16 @@
-# from tasks.markov import *
-from models.base_models import Transformer
-from icl.config import get_config
-from icl.utils.train import train_model_with_plot
 from tqdm.notebook import trange, tqdm
 
-def run_exp(show=True):
-    config = get_config()
-    # config.update_from_yaml(yaml_path)
-    # sampler_config = MarkovSamplerConfig()
-    # sampler_config.update_from_yaml(yaml_path)
-    
+# from tasks.markov import *
+from icl.models.base_models import Transformer
+from icl.config import get_config_base
+from icl.utils.train import train_model_with_plot
+
+
+def run_exp(show=True, verbose=False):
+    config = get_config_base()
     model = Transformer(config)
     model = model.to(config.device)
-
-    train_results = train_model_with_plot(model, config, show=show)
+    train_results = train_model_with_plot(model, config, show=show, verbose=verbose)
 
     return train_results, model
 
@@ -21,7 +18,7 @@ def run_exp(show=True):
 def run_exp_with_trans(trans_low, trans_high, every=1, log_scale=False, base=2, 
                        vocab_size=None, seq_len=None, hidden_dim=None, alpha=None, 
                        stationary=None):
-    config = get_config()
+    config = get_config_base()
     if vocab_size is not None: config.vocab_size = vocab_size
     if seq_len is not None: config.seq_len = seq_len
     if hidden_dim is not None:
@@ -38,3 +35,22 @@ def run_exp_with_trans(trans_low, trans_high, every=1, log_scale=False, base=2,
         model = model.to(config.device)
 
         _ = train_model_with_plot(model, config, show=False)
+
+
+def profile_exp(show=True, verbose=False):
+    config = get_config_base()
+    config.profile = True
+    config.mixed_precision = False  # Disable mixed precision for profiling
+    model = Transformer(config)
+    model = model.to(config.device)
+    _ = train_model_with_plot(model, config, show=show, verbose=verbose)
+
+    config.mixed_precision = True  # Re-enable mixed precision for subsequent runs
+    model = Transformer(config)
+    model = model.to(config.device)
+    _ = train_model_with_plot(model, config, show=show, verbose=verbose) 
+
+
+
+if __name__ == "__main__":
+    profile_exp(show=False, verbose=False)

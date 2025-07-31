@@ -30,7 +30,7 @@ def get_model_name(model):
 
 
 class TransformerLin(nn.Module):
-    def __init__(self, n_dims: int, n_points: int, n_layer: int, n_embd: int, n_head: int, seed: int, dtype: Any, pad: str = "bos"):
+    def __init__(self, n_dims: int, n_points: int, n_layer: int, n_embd: int, n_head: int, seed: int, dtype: Any, pad: str = "bos", activation: Optional[str] = None):
         super().__init__()
         self.n_points = n_points
         self.dtype = dtype
@@ -46,6 +46,7 @@ class TransformerLin(nn.Module):
             n_embd=n_embd,
             dtype=dtype,
             device= "cuda" if torch.cuda.is_available() else "cpu",
+            activation=activation if activation else "gelu",
         )
 
         torch.manual_seed(seed)

@@ -14,6 +14,7 @@ from icl.linear.lr_models import get_model
 from icl.linear.optimize import get_optimizer_and_lr_schedule
 from icl.linear.lr_eval import get_bsln_preds, get_model_preds, mse
 from icl.linear.lr_utils import tabulate_model
+# from icl.linear.linear_utils import get_attn
 
 Preds = dict[str, dict[str, torch.Tensor]]
 
@@ -29,11 +30,11 @@ def get_hash(config: ConfigDict) -> str:
     return hashlib.md5(config.to_json(sort_keys=True).encode("utf-8")).hexdigest()
 
 
-def get_sharded_batch_sampler(task: Task) -> Callable[[int], Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
-    n_devices = 1 #torch.cuda.device_count() or 1  # fallback to 1 if no CUDA
+def get_sharded_batch_sampler(task: Task, eval: bool=False) -> Callable[[int], Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
+    n_devices = 1 # torch.cuda.device_count() or 1  # fallback to 1 if no CUDA
 
     def sample_batch(step: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        data, tasks, targets = task.sample_batch(step)
+        data, tasks, targets = task.sample_batch(step, eval)
         batch_size = data.shape[0]
 
         assert batch_size % n_devices == 0, "Batch size must be divisible by number of devices"
@@ -70,6 +71,18 @@ def eval_step(model, data: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
     targets = targets.to(model.device)
     preds = model(data, targets)
     return preds
+
+def generate_wandb_run_name(config: ConfigDict, exp_name: str) -> str:
+    task = config.task
+    model = config.model
+    name = (
+        f"{task.name}_{model.name}"
+        f"_L{model.n_layer}_D{task.n_dims}_P{task.n_points}_E{model.n_embd}_H{model.n_head}"
+        f"_{model.activation}"
+        f"_ts{task.task_seed}"
+        f"_run{exp_name}"  # for uniqueness
+    )
+    return name
 
 
 def train(config: ConfigDict, verbose=False) -> None:
@@ -118,7 +131,7 @@ def train(config: ConfigDict, verbose=False) -> None:
     sample_train_batch = get_sharded_batch_sampler(train_task)
 
     samplers_eval = {
-        get_task_name(task): get_sharded_batch_sampler(task)
+        get_task_name(task): get_sharded_batch_sampler(task, eval=True)
         for task in train_task.get_default_eval_tasks(**config["eval"])
     }
     if verbose:
@@ -132,7 +145,8 @@ def train(config: ConfigDict, verbose=False) -> None:
 
     # Logging
     log = _init_log(bsln_preds, config["task"]["n_dims"])
-    wandb.init(config=config, name=exp_name, **config["wandb"])
+    wandb_name = generate_wandb_run_name(config, exp_name)
+    wandb.init(config=config, name=wandb_name, **config["wandb"])
     step = 0
 
     scaler = torch.amp.GradScaler("cuda")
@@ -174,6 +188,16 @@ def train(config: ConfigDict, verbose=False) -> None:
                     errs = mse(eval_preds[task_name]["Transformer"], bsln_target_preds) / config["task"]["n_dims"]
                     log[f"eval/{task_name}"][f"Transformer | {bsln_name}"].append(errs.tolist())
                     wandb.log({f"eval/{task_name}/{bsln_name}": errs.mean().item()}, step=i)
+            
+            # attns = get_attn(model, data, targets)
+            # attn_means_norm_sq = {layer_key: tensor.mean(dim=0).norm(dim=(-1,-2)).square().cpu().item() for layer_key, tensor in attns.items()}
+            # attn_vars_sum = {layer_key: tensor.var(dim=0).sum(dim=(-1,-2)).cpu().item() for layer_key, tensor in attns.items()}
+            # for layer_key, mean_norm_sq in attn_means_norm_sq.items():
+            #    wandb.log({f"eval/attn/{layer_key}/mean_norm_sq": mean_norm_sq}, step=i)
+            #    wandb.log({f"eval/attn/{layer_key}/vars_sum": attn_vars_sum[layer_key]}, step=i)
+            #    wandb.log({f"eval/attn/{layer_key}/ratio": attn_vars_sum[layer_key] / mean_norm_sq}, step=i)
+
+
 
     # Save final checkpoint
     torch.save({

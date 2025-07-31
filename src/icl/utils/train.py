@@ -1,28 +1,44 @@
 import torch
 import torch.nn as nn  
-# from models.ngram_trigger import *
 from collections import defaultdict
-# from tasks.causal_graph import *
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from absl import logging
 import pickle
 import os
 import wandb
 import json
+import nvtx
+from contextlib import contextmanager, nullcontext
+import timeit
+
+# from torch.utils.data import DataLoader
+# from IPython.display import display, HTML
 
 from icl.tasks.markov import *
 from icl.models.ngram_latent import *
 from icl.tasks import *
-
-# from torch.utils.data import DataLoader
 from .train_utils import get_attn_base, get_train_result, tabulate_model
 from icl.figures.plot import get_loss_plots
-# from IPython.display import display, HTML
 # from icl.figures.head_view import get_head_view
+# from icl.models.ngram_trigger import *
+# from icl.tasks.causal_graph import *
 
 from .basic import get_hash
 
 
+@contextmanager
+def maybe_nvtx_range(message, color="blue", enabled=True):
+    ctx = nvtx.annotate(message, color=color) if enabled else nullcontext() 
+    with ctx:
+        if enabled:
+            torch.cuda.synchronize()
+            start_time = timeit.default_timer()
+        yield
+        if enabled:
+            torch.cuda.synchronize() 
+            end_time = timeit.default_timer()
+            print(f"{message}: {end_time - start_time:.6f} s")
+            
 
 def _init_log() -> dict:
     """
@@ -39,6 +55,8 @@ def _init_log() -> dict:
 class BaseTrainer: 
     def __init__(self, config):
         self.config = config
+        self.mixed_precision = config.mixed_precision if hasattr(config, "mixed_precision") else True
+        self.profile = config.profile if hasattr(config, "profile") else False
         self.exp_name = f"train_{get_hash(config)}"
         self.exp_dir = os.path.join(config.work_dir, self.exp_name)  
         logging.info(f"Train Experiment\nNAME: {self.exp_name}\nCONFIG:\n{config}")
@@ -114,22 +132,27 @@ class BaseTrainer:
         if verbose: print(tabulate_model(model, self.config.seq_len, self.config.batch_size, self.config.device))
 
         optimizer = torch.optim.AdamW(model.parameters(), 
-                                      lr=self.config.training.learning_rate, 
-                                      weight_decay=self.config.training.weight_decay)  # torch.optim.Adam(model.parameters(), lr=config.learning_rate)
+                                    lr=self.config.training.learning_rate, 
+                                    weight_decay=self.config.training.weight_decay)  # torch.optim.Adam(model.parameters(), lr=config.learning_rate)
         scheduler = CosineAnnealingLR(optimizer, T_max=self.config.training.T_max) if self.config.training.scheduler is True else None
 
         data = {"test": None, "ood": None, "length_ood": None}
         infos = {"test": None, "ood": None, "length_ood": None}
+        scaler = torch.amp.GradScaler('cuda') if self.mixed_precision else None
+
         data["test"], infos["test"] = sampler.generate(mode="test")
         infos["test"] = self.info_process(infos["test"])
+            
 
         if self.config.task.ood:
             data["ood"], infos["ood"] = sampler.generate(mode="ood")
             infos["ood"] = self.info_process(infos["ood"])
+                
 
         if "length_ood" in self.config.task and self.config.task.length_ood:
             data["length_ood"], infos["length_ood"] = sampler.generate(mode="length_ood")
             infos["length_ood"] = self.info_process(infos["length_ood"])
+                
 
         # eval_batch, eval_info = sampler.generate(mode="eval")
         # eval_info = self.info_process(eval_info)
@@ -143,28 +166,48 @@ class BaseTrainer:
 
         if verbose: print("Starting training...")
         for iters in range(tot_iters): 
-            train_data = sampler.generate(epochs=epochs)
+            with maybe_nvtx_range(f"Generate Training Samples {iters}", color="green", enabled=self.config.profile):
+                train_data = sampler.generate(epochs=epochs)
+            
             sample, sample_info = train_data
             for i in range(epochs): 
+                if self.profile:
+                    print("="*50)
                 self.step += 1
                 model.train()
-                batch, batch_info = sample[i], sample_info[i]
+                batch, _ = sample[i], sample_info[i]
                 optimizer.zero_grad()
-                targets = batch[:, 1:].reshape(-1)
 
                 if (self.config.training.get_attn) > 0 and (self.step % self.config.training.get_attn == 0): 
                     self.attn_maps[self.step] = get_attn_base(model, batch)
 
-                outputs = model(batch)
-                
-                outputs = outputs[:, :-1, :].reshape(-1, self.config.vocab_size)
-                loss = self.criterion(outputs, targets)
+                with maybe_nvtx_range(f"Forward Pass {iters}:{i}", color="blue", enabled=self.config.profile):
+                    with torch.autocast(device_type='cuda', dtype=torch.bfloat16) if self.mixed_precision else nullcontext():
+                        outputs = model(batch)
+                        outputs = outputs[:, :-1, :].reshape(-1, self.config.vocab_size)
+                        targets = batch[:, 1:].reshape(-1)
+                        loss = self.criterion(outputs, targets)
+                        
 
                 self.log["train/loss"].append(loss.item())
                 wandb.log({"train/loss": loss.item()}, step=self.step)
-                loss.backward()
-                optimizer.step()
-                if scheduler: scheduler.step()
+
+                with maybe_nvtx_range(f"Backward Pass {iters}:{i}", color="red", enabled=self.config.profile):
+                    if self.mixed_precision:
+                        scaler.scale(loss).backward()
+                    else:
+                        loss.backward()
+
+                with maybe_nvtx_range(f"Optimizer Step {iters}:{i}", color="orange", enabled=self.config.profile):
+                    if self.mixed_precision:
+                        scaler.step(optimizer)
+                        scaler.update()
+                    else:
+                        optimizer.step()
+
+                if scheduler: 
+                    with maybe_nvtx_range(f"Scheduler Step {iters}:{i}", color="yellow", enabled=self.config.profile):
+                        scheduler.step()
 
                 if self.config.training.get_checkpoints > 0 and ((self.step % self.config.training.get_checkpoints == 0) 
                                                             or (self.step < min(self.config.training.get_checkpoints, 200) and self.step % 5 == 0)):
@@ -197,7 +240,7 @@ class MarkovTrainer(BaseTrainer):
     
     def get_task_loss(self, outputs, targets, info):
         return self.criterion(outputs[info], targets[info]).item()
-
+    
     def log_eval(self, model, data, infos):
         step = self.step
         with torch.no_grad():
@@ -243,7 +286,6 @@ class MarkovTrainer(BaseTrainer):
 
 
 
-
 def get_sampler(config):
     task_samplers = {
         "markov": MarkovSampler,
@@ -281,9 +323,13 @@ def train_model(config):
 
 
 
-def train_model_with_plot(model, config, show=False):
+def train_model_with_plot(model, config, show=False, verbose=False):
     exp_name = f"train_{get_hash(config)}"
     exp_dir = os.path.join(config.work_dir, exp_name)
+
+    cur_dir = os.getcwd()
+    if cur_dir.endswith("notebooks"):
+        exp_dir = os.path.join("..", exp_dir)
 
     print("Experiment directory: ", exp_dir) 
 
@@ -291,9 +337,10 @@ def train_model_with_plot(model, config, show=False):
         print(f"{exp_name} already completed")
         return
     
-
     trainer = train_model(config)
-    train_results = trainer.train(model, verbose=False)
+
+    with maybe_nvtx_range("Training"):
+        train_results = trainer.train(model, verbose=verbose)
     
     plot_path = os.path.join(exp_dir, "plots")
     os.makedirs(plot_path, exist_ok=True)
@@ -334,10 +381,11 @@ def train_model_with_plot(model, config, show=False):
         file.write(html)
     '''
 
-    last_key = sorted(list(train_results["attn_maps"].keys()))[-1]
-    last_attn = train_results["attn_maps"][last_key]
-    last_attn["steps"] = last_key
-    train_results["attn_maps"] = last_attn
+    if len(train_results["attn_maps"]) > 0:
+        last_key = sorted(list(train_results["attn_maps"].keys()))[-1]
+        last_attn = train_results["attn_maps"][last_key]
+        last_attn["steps"] = last_key
+        train_results["attn_maps"] = last_attn
 
     result_file_name = os.path.join(exp_dir, "sampler.pkl")
     with open(result_file_name, "wb") as file:

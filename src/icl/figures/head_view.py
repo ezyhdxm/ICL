@@ -4,6 +4,7 @@ import uuid
 from IPython.display import display, HTML, Javascript
 
 from icl.figures.view_util import *
+from icl.utils.train_utils import get_attn_base
 
 # Adapted from https://github.com/jessevig/bertviz/tree/master
 def head_view(attention, mask=None, tokens=None, layer=None, heads=None, include_layers=None, html_action='view'):
@@ -98,7 +99,7 @@ def head_view(attention, mask=None, tokens=None, layer=None, heads=None, include
         raise ValueError("'html_action' parameter must be 'view' or 'return")
 
 
-def get_head_view(model, config, mask=None, train_results=None, sampler=None, trunc=30, action='view', batch=None):
+def get_head_view(model, config, mask=None, train_results=None, sampler=None, trunc=None, action='view', batch=None):
     if train_results is None:
         if sampler is None:
             raise ValueError("Either 'train_results' or 'sampler' must be provided.")
@@ -106,17 +107,19 @@ def get_head_view(model, config, mask=None, train_results=None, sampler=None, tr
             train_results = {'sampler': sampler}
     sampler = train_results['sampler']
     if batch is None:
-        batch = sampler.generate()[0][0][:1]
-    _, attn_map = model(batch, get_attn=True)
+        batch, mask = sampler.generate(mode="test", num_samples=1)
+    attn_map = get_attn_base(model, batch)
 
-    trunc = trunc
+    if trunc is None:
+        trunc = config.seq_len
+    
     attn_tensors = [torch.zeros((1,config.model.num_heads[l],config.seq_len,config.seq_len)) for l in range(config.model.num_layers)]
     for l, attn in attn_map.items():
         attn = attn.unsqueeze(0)  # Number of heads in this layer
         attn_tensors[l][:1, :config.model.num_heads[l], :, :] = attn  # Fill attention tensor
 
-    trunc_attn = [attn_tensors[l][:1, :config.model.num_heads[l], trunc:, trunc:] for l in range(config.model.num_layers)]
-    trunc_attn = [trunc_attn[l]/trunc_attn[l].sum(dim=-1, keepdims=True) for l in range(config.model.num_layers)]
+    trunc_attn = [attn_tensors[l][:1, :config.model.num_heads[l], :trunc, :trunc] for l in range(config.model.num_layers)]
+    # trunc_attn = [trunc_attn[l]/trunc_attn[l].sum(dim=-1, keepdims=True) for l in range(config.model.num_layers)]
 
     if mask is not None:
         if isinstance(mask, torch.Tensor):
@@ -125,9 +128,9 @@ def get_head_view(model, config, mask=None, train_results=None, sampler=None, tr
             mask = mask.cpu().numpy().tolist()
             mask = [0 if m == 0 else 1 for m in mask]  # Convert to binary mask
 
-        mask = mask[trunc:]
+        mask = mask[:trunc]
 
     if action == 'view':
-        head_view(trunc_attn, mask, batch[0].tolist()[trunc:], html_action=action)
+        head_view(trunc_attn, mask, batch[0].tolist()[:trunc], html_action=action)
     else:
         return head_view(trunc_attn, mask, batch[0].tolist()[trunc:], html_action=action)

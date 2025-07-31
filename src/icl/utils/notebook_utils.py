@@ -1182,7 +1182,7 @@ def all_kl_plot(vocab_size=10, total_trans=10, file_path=None, task=None,
     plt.show()
 
 
-def view_mask(batch, info):
+def view_mask(batch, info, padded=False, dyck=False):
     a = batch.squeeze(0) if batch.dim() == 3 else batch
     b = info.squeeze(0) if info.dim() == 3 else info
 
@@ -1201,14 +1201,26 @@ def view_mask(batch, info):
         row_html = ""
         for j in range(a.shape[1]):
             val = int(a[i, j].item())
-            if val == pad:
-                val = "_"
-            elif val == (pad - 1):
-                val = "("
-            elif val == (pad - 2):
-                val = ")"
+            if padded:
+                if val == pad:
+                    val = "_"
+                elif dyck:
+                    if val == (pad - 1):
+                        val = "("
+                    elif val == (pad - 2):
+                        val = ")"
+                else:
+                    val = str(val)
             else:
-                val = str(val)
+                if dyck:
+                    if val == pad:
+                        val = "("
+                    elif val == (pad - 1):
+                        val = ")"
+                    else:
+                        val = str(val)
+                else:
+                    val = str(val)
             cell = f"<span style='display:inline-block; width:{cell_width}ch; text-align:center;'>{val}</span>"
             if b[i, j].item() != 0:
                 cell = f"<span style='color:red; font-weight:bold;'>{cell}</span>"
