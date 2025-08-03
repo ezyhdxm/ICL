@@ -12,9 +12,10 @@ Sampler = Callable[[int], tuple[torch.Tensor, torch.Tensor, torch.Tensor]]
 @dataclasses.dataclass
 class NoisyLinearRegression:
     n_tasks: int
+    n_minor_tasks: int
     n_dims: int
     n_points: int
-    p_ood: float
+    p_minor: float
     batch_size: int
     data_seed: int
     task_seed: int
@@ -27,8 +28,10 @@ class NoisyLinearRegression:
     def __post_init__(self):
         self.data_gen = torch.Generator().manual_seed(self.data_seed) # set independent generator for data sampling
         self.task_gen = torch.Generator().manual_seed(self.task_seed)
+        self.minor_gen = torch.Generator().manual_seed(self.task_seed + 1)  # separate generator for OOD tasks
         self.noise_gen = torch.Generator().manual_seed(self.noise_seed)
         self.task_pool: Optional[torch.Tensor] = self.generate_task_pool() if self.n_tasks > 0 else None
+        self.minor_pool: Optional[torch.Tensor] = self.generate_minor_pool() if self.n_minor_tasks > 0 else None
 
     @property
     def name(self) -> str:
@@ -47,6 +50,12 @@ class NoisyLinearRegression:
         shape = (self.n_tasks, self.n_dims, 1)
         return torch.randn(shape, generator=self.task_gen, dtype=self.dtype) * self.task_scale
 
+    def generate_minor_pool(self) -> torch.Tensor:
+        # generate a pool of tasks w1, w2, ..., wN, where N = n_tasks
+        # w_i ~ N(0, task_scale^2 * I), where I is the identity matrix of size D = n_dims
+        shape = (self.n_minor_tasks, self.n_dims, 1)
+        return torch.randn(shape, generator=self.minor_gen, dtype=self.dtype) * self.task_scale
+
     def sample_data(self, step: int) -> torch.Tensor:
         # generate a batch of data points x1, x2, ..., xN, where N = n_points
         # x_i ~ N(0, data_scale^2 * I), where I is the identity matrix of size D = n_dims
@@ -62,11 +71,14 @@ class NoisyLinearRegression:
             assert self.task_pool is not None, "Task pool must be initialized"
             idxs = torch.randint(low=0, high=self.n_tasks, size=(self.batch_size,), generator=gen) # (batch_size,)
             tasks = self.task_pool[idxs]
-            if not eval and self.p_ood > 0:
-                ood_mask = torch.rand(self.batch_size) < self.p_ood
+            if not eval and self.p_minor > 0:
+                ood_mask = torch.rand(self.batch_size) < self.p_minor
                 n_ood = int(ood_mask.sum().item())
                 ood_shape = (n_ood, self.n_dims, 1)
-                ood_tasks = torch.randn(ood_shape, generator=gen, dtype=self.dtype) * self.task_scale
+                if self.minor_pool is not None:
+                    ood_tasks = self.minor_pool[torch.randint(low=0, high=self.n_minor_tasks, size=(n_ood,), generator=gen)]
+                else:
+                    ood_tasks = torch.randn(ood_shape, generator=gen, dtype=self.dtype) * self.task_scale
                 if n_ood > 0:
                     tasks[ood_mask] = ood_tasks
         else:

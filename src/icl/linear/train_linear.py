@@ -92,6 +92,8 @@ def train(config: ConfigDict, verbose=False) -> None:
     cur_dir = os.getcwd()
     if cur_dir.endswith("notebooks"):
         exp_dir = os.path.join("..", exp_dir)
+    
+    print(exp_dir)
 
     # logging.info(f"Train Experiment\nNAME: {exp_name}\nCONFIG:\n{config}")
 

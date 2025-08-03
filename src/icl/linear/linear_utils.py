@@ -197,7 +197,7 @@ def compute_task_vectors(config,
     task_vectors : torch.Tensor
         Tensor of shape (n_tasks, n_points - 1, batch_size, n_embd)
     """
-    n_tasks = config.task.n_tasks
+    n_tasks = train_task.task_pool.shape[0]
     n_points = config.task.n_points
     batch_size = train_task.batch_size
     n_embd = config.model.n_embd
@@ -386,7 +386,7 @@ def moving_l2_distance_from_mean_sumD(x: torch.Tensor, window_size: int, sqrt: b
 
 
 def get_dmmse_posterior(train_task, k):
-    task_pool = train_task.task_pool.unsqueeze(-1)  # (n_tasks, D)
+    task_pool = train_task.task_pool.squeeze(-1)  # (n_tasks, D)
     noise_scale = train_task.noise_scale
     xs, ys = train_task.sample_from_task(train_task.task_pool[k], step=0)
     B, T, D = xs.shape
@@ -397,7 +397,27 @@ def get_dmmse_posterior(train_task, k):
     posterior[:, 0, :] = 1.0 / K  # uniform prior at t=0
 
     for t in range(T-1):
-        curr_log = (ys[:,t].unsqueeze(1) - (xs[:,t] @ task_pool.T)).pow(2) / (2 * noise_scale ** 2)
+        curr_log = (ys[:,t].unsqueeze(1) - (xs[:,t] @ task_pool.transpose(0,1))).pow(2) / (2 * noise_scale ** 2)
+        lognum -= curr_log.squeeze(0).squeeze(0)
+        logdenom = torch.logsumexp(lognum, dim=1)
+        posterior[:, t+1] = torch.exp(lognum - logdenom[:, None])
+    
+    return posterior, xs
+
+
+def get_dmmse_posterior_eval(eval_task, train_task, k):
+    task_pool = train_task.task_pool.squeeze(-1)  # (n_tasks, D)
+    noise_scale = train_task.noise_scale
+    xs, ys = eval_task.sample_from_task(eval_task.task_pool[k], step=0)
+    B, T, D = xs.shape
+    K = task_pool.shape[0]
+
+    lognum = torch.zeros((B, K), device=xs.device, dtype=xs.dtype)
+    posterior = torch.zeros((B, T, K), device=xs.device, dtype=xs.dtype)
+    posterior[:, 0, :] = 1.0 / K  # uniform prior at t=0
+
+    for t in range(T-1):
+        curr_log = (ys[:,t].unsqueeze(1) - (xs[:,t] @ task_pool.transpose(0,1))).pow(2) / (2 * noise_scale ** 2)
         lognum -= curr_log.squeeze(0).squeeze(0)
         logdenom = torch.logsumexp(lognum, dim=1)
         posterior[:, t+1] = torch.exp(lognum - logdenom[:, None])
@@ -446,7 +466,43 @@ def estimate_lambda_with_r2(task_vecs, task_vecs_over_all_time):
 
 
 
+def estimate_lambda_with_r2_fast(task_vecs, task_vecs_over_all_time):
+    """
+    Estimate lambda_{j', t}^{(j)} with constraints and return R² of the fit.
 
+    Returns:
+        lambdas: (k, seq_len, num_tasks)
+        r2_scores: (k, seq_len) -- R² value per fit
+    """
+    k, seq_len, d = task_vecs_over_all_time.shape
+    num_tasks = task_vecs.shape[0]
+    lambdas = np.zeros((k, num_tasks))
+    r2_scores = np.zeros((k,))
+
+    X = task_vecs.T  # shape (d, num_tasks)
+    lambda_var = cp.Variable(num_tasks)
+    constraints = [lambda_var >= 1e-8, cp.sum(lambda_var) == 1]
+
+    for j in range(k):
+        y = task_vecs_over_all_time[j, -1, :]  # shape (d,)
+        objective = cp.Minimize(cp.sum_squares(X @ lambda_var - y))
+        prob = cp.Problem(objective, constraints)
+        prob.solve()
+
+        if lambda_var.value is None:
+            raise ValueError(f"cvxpy solver failed")
+
+        lambdas[j, :] = lambda_var.value
+
+        y = np.asarray(y)
+        # Goodness of fit
+        y_pred = X @ lambda_var.value
+        y_pred = np.asarray(y_pred)
+        ss_res = np.sum((y - y_pred) ** 2)
+        ss_tot = np.sum((y - y.mean()) ** 2)
+        r2_scores[j] = 1 - ss_res / ss_tot if ss_tot > 0 else np.nan
+
+    return lambdas, r2_scores
 
 
 

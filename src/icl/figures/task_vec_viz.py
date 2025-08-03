@@ -228,7 +228,7 @@ def plot_task_vector_differences(task_vectors: torch.Tensor, normalize: bool = T
     return tvs_diff_means
 
 
-def plot_lambdas(lambdas):
+def plot_lambdas(lambdas, convex_combs=None):
     """
     Create an interactive Plotly plot with a dropdown to select task k,
     and plot λ^{(k)}_{j',t} over positions t with LaTeX title.
@@ -260,33 +260,176 @@ def plot_lambdas(lambdas):
         for i in range(num_fit_tasks):
             visibility[k * num_fit_tasks + i] = True
 
-        button = dict(
-            label=f"Task k = {k}",
-            method="update",
-            args=[
-                {"visible": visibility},
-                {"title.text": f"$\\lambda^{{({k})}}_{{j', t}}$ over positions"}
-            ]
-        )
+        if convex_combs is None:
+            button = dict(
+                label=f"Task k = {k}",
+                method="update",
+                args=[
+                    {"visible": visibility},
+                    {"title.text": f"$\\lambda^{{({k})}}_{{j', t}}$ over positions"}
+                ]
+            )
+        else:
+            a0, a1, a2 = convex_combs[k]
+            button = dict(
+                label=f"Task k = {k}",
+                method="update",
+                args=[
+                    {"visible": visibility},
+                    {"title.text": f"${a0:.2f}\\theta_{{0}} + {a1:.2f}\\theta_{{1}} + {a2:.2f}\\theta_{{2}}$ over positions"}
+                ]
+            )
         dropdown_buttons.append(button)
 
     # Create the figure
+    if convex_combs is not None:
+        a0, a1, a2 = convex_combs[0]
+    init_title = "$\\lambda^{(0)}_{j', t}$ over positions" if convex_combs is None else f"${a0:.2f}\\theta_{{0}} + {a1:.2f}\\theta_{{1}} + {a2:.2f}\\theta_{{2}}$ over positions"
     fig = go.Figure(data=traces)
     fig.update_layout(
         updatemenus=[dict(
             buttons=dropdown_buttons,
             direction="down",
             showactive=True,
-            x=0.1,
+            x=0.5,
             y=1.15,
             xanchor="left",
             yanchor="top"
         )],
-        title_text="$\\lambda^{(0)}_{j', t}$ over positions",  # initial title
+        title_text=init_title,  # initial title
         xaxis_title="Position $t$",
         yaxis_title="Belief weight $\\lambda$",
         legend_title="$j'$ (latent task index)",
         height=500
     )
+
+    fig.show()
+
+
+def plot_task_vector_modes(
+    task_vectors: torch.Tensor,
+    normalize: bool = True,
+    save_path: Union[str, None] = None,
+    verbose: bool = False
+) -> None:
+    if normalize:
+        task_vectors = task_vectors / task_vectors.norm(dim=-1, keepdim=True)
+
+    n_tasks, seq_len, _, _ = task_vectors.shape
+    x = np.arange(1, seq_len + 1)
+
+    # --- Mode 1: Task vector variance and power-law fit ---
+    tvs_means = task_vectors.mean(dim=-2, keepdim=True)
+    tsds = (task_vectors - tvs_means).norm(dim=-1)
+    tvars = (tsds**2).mean(dim=-1).cpu().numpy()
+    mean_tvar = tvars.mean(axis=0)
+
+    def power_law_model(x, a, c, b):
+        return a * x**c + b
+
+    try:
+        popt, _ = curve_fit(power_law_model, x, mean_tvar, p0=(1.0, -1.0, 0.0), maxfev=10000)
+        fitted_curve = power_law_model(x, *popt)
+        a_fit, c_fit, b_fit = popt
+        fit_label = f"Fit: {a_fit:.2f}·x^{c_fit:.2f} {'-' if b_fit < 0 else '+'} {abs(b_fit):.2f}"
+    except Exception as e:
+        if verbose:
+            print(f"[Warning] curve_fit failed: {e}")
+        fitted_curve = None
+        fit_label = "Fit failed"
+
+    # --- Mode 2: Mean of task vector differences ---
+    avg_task_vector = task_vectors.mean(dim=0)
+    diff_means = []
+    diff_norms = []
+    for i in range(n_tasks):
+        diff = task_vectors[i] - avg_task_vector
+        diff_mean = diff.mean(dim=1)
+        diff_means.append(diff_mean.cpu().numpy())
+        diff_norm = diff_mean.norm(dim=-1)
+        diff_norms.append(diff_norm.cpu().numpy())
+
+    # --- Mode 3: Variance of task vector differences ---
+    pairwise_tvars = []
+    for i in range(n_tasks):
+        diff = task_vectors[i] - avg_task_vector
+        tsds_diff = (diff - diff.mean(dim=-2, keepdim=True)).norm(dim=-1)
+        tvar_diff = (tsds_diff**2).mean(dim=-1).cpu().numpy()
+        pairwise_tvars.append(tvar_diff)
+
+    # --- Plotly Traces ---
+    fig = go.Figure()
+
+    # Traces for Mode 1
+    for i in range(n_tasks):
+        fig.add_trace(go.Scatter(x=x, y=tvars[i], mode='lines', opacity=0.5,
+                                 line=dict(width=1),
+                                 name=f"Task {i}",
+                                 visible=True))
+    if fitted_curve is not None:
+        fig.add_trace(go.Scatter(x=x, y=fitted_curve, mode='lines',
+                                 line=dict(color='red', dash='dash', width=2),
+                                 name=fit_label,
+                                 visible=True))
+
+    # Traces for Mode 2
+    for i in range(n_tasks):
+        fig.add_trace(go.Scatter(x=x, y=diff_norms[i], mode='lines', opacity=0.5,
+                                 line=dict(width=1),
+                                 name=f"Diff Task {i}",
+                                 visible=False))
+
+    # Traces for Mode 3
+    for i in range(n_tasks):
+        fig.add_trace(go.Scatter(x=x, y=pairwise_tvars[i], mode='lines', opacity=0.5,
+                                 line=dict(width=1),
+                                 name=f"VarDiff Task {i}",
+                                 visible=False))
+
+    # --- Dropdown Menus ---
+    n_mode1 = n_tasks + (1 if fitted_curve is not None else 0)
+    n_mode2 = n_tasks
+    n_mode3 = n_tasks
+
+    def visibility_mask(n_total, start, length):
+        return [i >= start and i < start + length for i in range(n_total)]
+
+    total_traces = n_mode1 + n_mode2 + n_mode3
+
+    dropdown_buttons = [
+        dict(label="Task Vector Variance (Power-law fit)",
+            method="update",
+            args=[{"visible": visibility_mask(total_traces, 0, n_mode1)},
+                {"title": {"text": "Hidden Vector Variance vs Position"},
+                    "yaxis": {"title": "Variance"}}]),
+
+        dict(label="Mean of Task Vector Differences",
+            method="update",
+            args=[{"visible": visibility_mask(total_traces, n_mode1, n_mode2)},
+                {"title": {"text": "Mean of Hidden Vector Differences vs Position"},
+                    "yaxis": {"title": "Norm"}}]),
+
+        dict(label="Variance of Task Vector Differences",
+            method="update",
+            args=[{"visible": visibility_mask(total_traces, n_mode1 + n_mode2, n_mode3)},
+                {"title": {"text": "Variance of Hidden Vector Differences vs Position"},
+                    "yaxis": {"title": "Variance"}}])
+    ]
+
+    # --- Final Layout ---
+    fig.update_layout(
+        updatemenus=[dict(active=0,
+                          buttons=dropdown_buttons,
+                          x=0.01, y=1.1, xanchor="left", yanchor="top")],
+        title="Hidden Vector Variance vs Position",
+        xaxis_title="Position",
+        yaxis_title="Variance",
+        width=900,
+        height=600,
+        template="plotly_white"
+    )
+
+    if save_path:
+        fig.write_image(save_path, scale=3)
 
     fig.show()

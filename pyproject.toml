@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "absl-py>=2.3.1",
+    "anywidget>=0.9.18",
     "cvxpy>=1.7.1",
     "ipython>=8.37.0",
     "jupyter>=1.1.1",

@@ -15,9 +15,6 @@ from icl.utils import (
     view_mask,
 )
 from icl.linear import (
-    plot_task_vector_differences,
-    plot_task_vector_variance_with_fit,
-    plot_pairwise_task_vector_variance,
     extract_task_vector,
     predict_with_task_vector,
     get_config,
@@ -26,6 +23,12 @@ from icl.linear import (
     DiscreteMMSE,
     Ridge
 )
+from icl.figures.task_vec_viz import (
+    plot_task_vector_differences,
+    plot_task_vector_variance_with_fit,
+    plot_pairwise_task_vector_variance,
+)
+
 from icl.tasks import (
     DyckPathTask,
     RepetitionTask,
