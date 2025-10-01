@@ -105,7 +105,8 @@ def get_head_view(model, config, mask=None, train_results=None, sampler=None, tr
             raise ValueError("Either 'train_results' or 'sampler' must be provided.")
         else:
             train_results = {'sampler': sampler}
-    sampler = train_results['sampler']
+    else:
+        sampler = train_results['sampler']
     if batch is None:
         batch, mask = sampler.generate(mode="test", num_samples=1)
     attn_map = get_attn_base(model, batch)

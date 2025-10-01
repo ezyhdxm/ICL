@@ -30,11 +30,11 @@ def get_hash(config: ConfigDict) -> str:
     return hashlib.md5(config.to_json(sort_keys=True).encode("utf-8")).hexdigest()
 
 
-def get_sharded_batch_sampler(task: Task, eval: bool=False) -> Callable[[int], Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
+def get_sharded_batch_sampler(task: Task, is_eval: bool=False) -> Callable[[int], Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
     n_devices = 1 # torch.cuda.device_count() or 1  # fallback to 1 if no CUDA
 
     def sample_batch(step: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        data, tasks, targets = task.sample_batch(step, eval)
+        data, tasks, targets = task.sample_batch(step, is_eval=is_eval)
         batch_size = data.shape[0]
 
         assert batch_size % n_devices == 0, "Batch size must be divisible by number of devices"
@@ -47,7 +47,7 @@ def get_sharded_batch_sampler(task: Task, eval: bool=False) -> Callable[[int], T
 
     return sample_batch
 
-def _init_log(bsln_preds: Preds, n_dims: int) -> dict:
+def _init_log(bsln_preds_false: Preds, bsln_preds_true: Preds, n_dims: int) -> dict:
     """
     Initialize log dictionary for evaluation metrics.
     Args:
@@ -55,13 +55,23 @@ def _init_log(bsln_preds: Preds, n_dims: int) -> dict:
         n_dims: number of dimensions
     """
     log = {"train/step": [], "train/lr": []}
-    for _task_name, _task_preds in bsln_preds.items():
-        log[f"eval/{_task_name}"] = {}
+    for _task_name, _task_preds in bsln_preds_false.items():
+        log[f"eval/{_task_name}_false"] = {}
         for _bsln_name, _bsln_preds in _task_preds.items():
-            log[f"eval/{_task_name}"][f"Transformer | {_bsln_name}"] = []
+            log[f"eval/{_task_name}_false"][f"Transformer | {_bsln_name}"] = []
             if _bsln_name != "True":
                 _errs = mse(_bsln_preds, _task_preds["True"]) / n_dims
-                log[f"eval/{_task_name}"][f"{_bsln_name} | True"] = _errs.tolist()
+                log[f"eval/{_task_name}_false"][f"{_bsln_name} | True"] = _errs.tolist()
+    
+    for _task_name, _task_preds in bsln_preds_true.items():
+        log[f"eval/{_task_name}_true"] = {}
+        for _bsln_name, _bsln_preds in _task_preds.items():
+            log[f"eval/{_task_name}_true"][f"Transformer | {_bsln_name}"] = []
+            if _bsln_name != "True":
+                _errs = mse(_bsln_preds, _task_preds["True"]) / n_dims
+                log[f"eval/{_task_name}_true"][f"{_bsln_name} | True"] = _errs.tolist()
+        
+    print(log.keys())
     return log
 
 @torch.no_grad()
@@ -132,21 +142,27 @@ def train(config: ConfigDict, verbose=False) -> None:
     train_task = get_task(**config["task"], dtype=data_type)
     sample_train_batch = get_sharded_batch_sampler(train_task)
 
-    samplers_eval = {
-        get_task_name(task): get_sharded_batch_sampler(task, eval=True)
+    samplers_eval_false = {
+        get_task_name(task): get_sharded_batch_sampler(task, is_eval=False)
+        for task in train_task.get_default_eval_tasks(**config["eval"])
+    } 
+    samplers_eval_true = {
+        get_task_name(task): get_sharded_batch_sampler(task, is_eval=True)
         for task in train_task.get_default_eval_tasks(**config["eval"])
     }
+    
     if verbose:
         print("Initialized data samplers")
 
     # Evaluate baselines
     if verbose:
         print("Evaluating baselines...")
-    bsln_preds = get_bsln_preds(train_task, samplers_eval, config["eval"]["n_samples"], config["eval"]["batch_size"])
+    bsln_preds_false = get_bsln_preds(train_task, samplers_eval_false, config["eval"]["n_samples"], config["eval"]["batch_size"])
+    bsln_preds_true = get_bsln_preds(train_task, samplers_eval_false, config["eval"]["n_samples"], config["eval"]["batch_size"])
 
 
     # Logging
-    log = _init_log(bsln_preds, config["task"]["n_dims"])
+    log = _init_log(bsln_preds_false, bsln_preds_true, config["task"]["n_dims"])
     wandb_name = generate_wandb_run_name(config, exp_name)
     wandb.init(config=config, name=wandb_name, **config["wandb"])
     step = 0
@@ -180,17 +196,29 @@ def train(config: ConfigDict, verbose=False) -> None:
             log["train/lr"].append(lr_val)
             wandb.log({"train/lr": lr_val}, step=i)
 
-            eval_preds = get_model_preds(
-                model, eval_step, samplers_eval, config["eval"]["n_samples"], config["eval"]["batch_size"]
+            eval_preds_false = get_model_preds(
+                model, eval_step, samplers_eval_false, config["eval"]["n_samples"], config["eval"]["batch_size"]
             )
 
-            for task_name, task_preds in bsln_preds.items():
+            eval_preds_true = get_model_preds(
+                model, eval_step, samplers_eval_true, config["eval"]["n_samples"], config["eval"]["batch_size"]
+            )
+
+            for task_name, task_preds in bsln_preds_false.items():
                 for bsln_name, bsln_target_preds in task_preds.items():
                     bsln_target_preds = bsln_target_preds.to(config.device)
-                    errs = mse(eval_preds[task_name]["Transformer"], bsln_target_preds) / config["task"]["n_dims"]
-                    log[f"eval/{task_name}"][f"Transformer | {bsln_name}"].append(errs.tolist())
-                    wandb.log({f"eval/{task_name}/{bsln_name}": errs.mean().item()}, step=i)
-            
+                    errs = mse(eval_preds_false[task_name]["Transformer"], bsln_target_preds) / config["task"]["n_dims"]
+                    log[f"eval/{task_name}_false"][f"Transformer | {bsln_name}"].append(errs.tolist())
+                    wandb.log({f"eval/{task_name}_false/{bsln_name}": errs.mean().item()}, step=i)
+                
+            for task_name, task_preds in bsln_preds_true.items():
+                for bsln_name, bsln_target_preds in task_preds.items():
+                    bsln_target_preds = bsln_target_preds.to(config.device)
+                    errs = mse(eval_preds_true[task_name]["Transformer"], bsln_target_preds) / config["task"]["n_dims"]
+                    log[f"eval/{task_name}_true"][f"Transformer | {bsln_name}"].append(errs.tolist())
+                    wandb.log({f"eval/{task_name}_true/{bsln_name}": errs.mean().item()}, step=i)
+                    
+
             # attns = get_attn(model, data, targets)
             # attn_means_norm_sq = {layer_key: tensor.mean(dim=0).norm(dim=(-1,-2)).square().cpu().item() for layer_key, tensor in attns.items()}
             # attn_vars_sum = {layer_key: tensor.var(dim=0).sum(dim=(-1,-2)).cpu().item() for layer_key, tensor in attns.items()}
@@ -198,6 +226,12 @@ def train(config: ConfigDict, verbose=False) -> None:
             #    wandb.log({f"eval/attn/{layer_key}/mean_norm_sq": mean_norm_sq}, step=i)
             #    wandb.log({f"eval/attn/{layer_key}/vars_sum": attn_vars_sum[layer_key]}, step=i)
             #    wandb.log({f"eval/attn/{layer_key}/ratio": attn_vars_sum[layer_key] / mean_norm_sq}, step=i)
+        
+        if (i % config["eval"].get("save_every", 1000) == 0):
+            torch.save({
+                "model": model.state_dict(), 
+                "step": step,
+                }, os.path.join(exp_dir, f"model_{step}.pt"))
 
 
 

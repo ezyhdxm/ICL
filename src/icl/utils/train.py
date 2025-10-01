@@ -59,6 +59,9 @@ class BaseTrainer:
         self.profile = config.profile if hasattr(config, "profile") else False
         self.exp_name = f"train_{get_hash(config)}"
         self.exp_dir = os.path.join(config.work_dir, self.exp_name)  
+        cur_dir = os.getcwd()
+        if cur_dir.endswith("notebooks"):
+            self.exp_dir = os.path.join("..", self.exp_dir)
         logging.info(f"Train Experiment\nNAME: {self.exp_name}\nCONFIG:\n{config}")
         self.MAX_SIZE = 1024
         self.log_path = os.path.join(self.exp_dir, "log.json")
@@ -222,6 +225,7 @@ class BaseTrainer:
                     wandb.log({"train/lr": lr_val}, step=self.step)
                     self.log_eval(model, data, infos)
 
+        print("Saving final model...")
         self.save_checkpoint(model, optimizer, is_final=True)
         with open(self.log_path, "w") as f:
             json.dump(self.log, f, indent=2)

@@ -15,11 +15,11 @@ from icl.utils import (
     view_mask,
 )
 from icl.linear import (
-    extract_task_vector,
+    extract_hidden,
     predict_with_task_vector,
     get_config,
     get_attn,
-    compute_task_vectors,
+    compute_hiddens,
     DiscreteMMSE,
     Ridge
 )
@@ -57,8 +57,8 @@ __all__ = [
     "plot_task_vector_differences",
     "plot_task_vector_variance_with_fit",
     "plot_pairwise_task_vector_variance",
-    "extract_task_vector",
+    "extract_hidden",
     "predict_with_task_vector",
     "get_attn",
-    "compute_task_vectors",
+    "compute_hiddens",
 ]

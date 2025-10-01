@@ -1,14 +1,14 @@
-from .linear_utils import (extract_task_vector, 
+from .linear_utils import (extract_hidden, 
                            predict_with_task_vector, 
-                           get_attn, compute_task_vectors)
+                           get_attn, compute_hiddens)
 from .lr_models import DiscreteMMSE, Ridge
 from .lr_config import get_config
 
 __all__ = [
-    "extract_task_vector",
+    "extract_hidden",
     "predict_with_task_vector",
     "get_attn",
-    "compute_task_vectors",
+    "compute_hiddens",
     "DiscreteMMSE",
     "Ridge",
     "get_config"

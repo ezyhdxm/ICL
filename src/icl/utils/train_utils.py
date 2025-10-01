@@ -98,7 +98,7 @@ def pth_score(model, batch, layer=0):
 
 def ih_score(model, batch, device, layer=1):
     attns = get_attn_at_layer_base(model, batch, layer)
-    attns = attns.squeeze(1)
+    attns = attns.squeeze(1) # (B, H, T, T)
     B, T = batch.shape
     
     # Compare all pairs: (B, T, T), batch[b, i] == batch[b, t]

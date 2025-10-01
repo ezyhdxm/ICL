@@ -9,14 +9,14 @@ def get_config_base() -> ConfigDict:
     config = ConfigDict()
     config.profile = False  # Default profiling flag, can be set to True for performance profiling
     config.mixed_precision = True  # Default mixed precision flag, can be set to True for mixed precision training
-    config.seq_len = 256
-    config.vocab_size = 20
+    config.seq_len = 64
+    config.vocab_size = 6
     config.seed = 10086
     config.batch_size = 64
     config.eval_size = 128
     config.test_size = 512
     config.device = "cuda:0" if torch.cuda.is_available() else "cpu"
-    TASKNAME = "reversion"  # Default task name, can be overridden in config
+    TASKNAME = "latent"  # Default task name, can be overridden in config
     config.work_dir = os.path.join("results", TASKNAME)  # Specify working directory
     config.ngram = 3  # N-gram order for the n-gram learner
     config.wandb = ConfigDict()
@@ -31,11 +31,15 @@ def get_config_base() -> ConfigDict:
     config.task.order = 1  # Order of the Markov chain
     config.task.alpha = 1  # Dirichlet prior for the transition matrix
     config.task.ood = True  # Out-of-distribution flag
-    config.task.total_trans = 2500  # Total number of transitions to sample
+    config.task.n_tasks = 3  # Total number of transitions to sample
+    config.task.p_minor = 0.1  # Probability of tasks from the minor task pool
+    config.task.n_minor_tasks = 0  # Number of minor tasks, if needed
     config.task.init_task_pool = None
     if config.task.name == "latent":
         config.task.stationary = False # Whether to use sampled stationary distribution
         config.task.pad = True  # Whether to pad the sequences with a special token
+        config.task.bandwidth = None          
+        config.task.circular_band = True
 
     # configurations for random triggers
     elif config.task.name == "frm":
@@ -54,7 +58,7 @@ def get_config_base() -> ConfigDict:
         config.task.repeat_prob = 8/config.seq_len  # Probability of repeating the sequence
     
     elif config.task.name == "dyck":
-        config.task.dyck_length = 10
+        config.task.dyck_length = 15
         config.task.repeat_prob = 0.3
     
         # config.task.pad = True  # Whether to pad the sequences with a special token
@@ -65,7 +69,7 @@ def get_config_base() -> ConfigDict:
     #     Model          #
     ######################
 
-    NUM_LAYERS = 3 # Default number of layers, can be overridden in config
+    NUM_LAYERS = 8 # Default number of layers, can be overridden in config
 
     config.model = ConfigDict()
     config.model.emb_dim = 128
@@ -73,13 +77,13 @@ def get_config_base() -> ConfigDict:
     config.model.mlp_bias = True
     config.model.ff_dim = 4*128
     config.model.num_layers = NUM_LAYERS
-    config.model.num_heads = tuple([1]*NUM_LAYERS)  # Tuple of number of heads for each layer
+    config.model.num_heads = tuple([2]*NUM_LAYERS)  # Tuple of number of heads for each layer
     config.model.dropout = None  # Dropout rate, None means no dropout
     config.model.mask = True  # Whether to use masking in attention
-    config.model.mlp = tuple([False]*NUM_LAYERS)  # Tuple indicating whether to use MLP in each layer
-    config.model.layer_norm = False  # Whether to use layer normalization
+    config.model.mlp = tuple([True]*NUM_LAYERS)  # Tuple indicating whether to use MLP in each layer
+    config.model.layer_norm = True  # Whether to use layer normalization
     config.model.activation = tuple([True]*NUM_LAYERS)  # Tuple indicating whether to use activation in each layer
-    config.model.pos_enc = "abs"  # Type of positional encoding
+    config.model.pos_enc = "rotary"  # Type of positional encoding
     config.model.pos_max_len = config.seq_len  # Maximum length for positional encoding
     config.model.flash = True  # Whether to use flash attention for faster computation
     
@@ -89,12 +93,12 @@ def get_config_base() -> ConfigDict:
     #######################
 
     config.training = ConfigDict()
-    config.training.num_epochs = 40_000
+    config.training.num_epochs = 25_000
     config.training.learning_rate = 2e-4
     config.training.eval_iter = 50
     config.training.get_attn = 5_000
     config.training.get_checkpoints = 100
-    config.training.weight_decay = 1e-2
+    config.training.weight_decay = 1e-4
     config.training.freeze_value = False
     config.training.freeze_out = False
     config.training.identity_query = False
